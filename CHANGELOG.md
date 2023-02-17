@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - TBD
 
-## [1.0.0] - 2022-07-08
+## [1.1.0] - 2022-07-08
+
+## Added
+- Added `RunCh` which call concurrently the given function with the given context returning a channel of results.
+
+### Changed
+- `Run` now requires `context`.
+
+## [1.0.1] - 2022-07-08
 ### Added
 - First release.

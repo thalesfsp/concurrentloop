@@ -6,6 +6,7 @@
 package concurrentloop
 
 import (
+	"context"
 	"errors"
 	"testing"
 )
@@ -16,27 +17,27 @@ func TestNew_ConcurrentProcessing(t *testing.T) {
 	sl3 := []float64{1.1, 2.2, 3.3, 4.4, 5.5}
 
 	// Create a function that will be called concurrently.
-	cF1 := func(i int) (int, error) {
+	cF1 := func(ctx context.Context, i int) (int, error) {
 		return i * 2, nil
 	}
 
-	cF2 := func(s string) (string, error) {
+	cF2 := func(ctx context.Context, s string) (string, error) {
 		return s + s, nil
 	}
 
-	cF3 := func(f float64) (float64, error) {
+	cF3 := func(ctx context.Context, f float64) (float64, error) {
 		return f * 2, nil
 	}
 
-	cF4 := func(s string) (string, error) {
+	cF4 := func(ctx context.Context, s string) (string, error) {
 		return "", errors.New("error")
 	}
 
 	// Call the function concurrently.
-	r1, err1 := Run(sl1, cF1)
-	r2, err2 := Run(sl2, cF2)
-	r3, err3 := Run(sl3, cF3)
-	r4, err4 := Run(sl2, cF4)
+	r1, err1 := Run(context.Background(), sl1, cF1)
+	r2, err2 := Run(context.Background(), sl2, cF2)
+	r3, err3 := Run(context.Background(), sl3, cF3)
+	r4, err4 := Run(context.Background(), sl2, cF4)
 
 	if err1 != nil {
 		t.Errorf("ConcurrentProcessing() error = %v", err1)
