@@ -34,10 +34,10 @@ func TestNew_ConcurrentProcessing(t *testing.T) {
 	}
 
 	// Call the function concurrently.
-	r1, err1 := Run(context.Background(), sl1, cF1)
-	r2, err2 := Run(context.Background(), sl2, cF2)
-	r3, err3 := Run(context.Background(), sl3, cF3)
-	r4, err4 := Run(context.Background(), sl2, cF4)
+	r1, err1 := Map(context.Background(), sl1, cF1)
+	r2, err2 := Map(context.Background(), sl2, cF2)
+	r3, err3 := Map(context.Background(), sl3, cF3)
+	r4, err4 := Map(context.Background(), sl2, cF4)
 
 	if err1 != nil {
 		t.Errorf("ConcurrentProcessing() error = %v", err1)
