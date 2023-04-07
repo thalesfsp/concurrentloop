@@ -58,8 +58,13 @@ func ExecuteCh[T any](ctx context.Context, fns []ExecuteFunc[T]) chan ResultCh[T
 
 		go func(fn ExecuteFunc[T]) {
 			result, err := fn(ctx)
+			if err != nil {
+				resultsCh <- ResultCh[T]{Output: result, Error: err}
 
-			resultsCh <- ResultCh[T]{Output: result, Error: err}
+				return
+			}
+
+			resultsCh <- ResultCh[T]{Output: result, Error: nil}
 		}(fn)
 	}
 
