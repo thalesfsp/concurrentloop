@@ -61,7 +61,6 @@ func MapCh[T any, Result any](ctx context.Context, sl []T, f MapFunc[T, Result])
 
 		go func(t T) {
 			result, err := f(ctx, t)
-
 			if err != nil {
 				resultsCh <- ResultCh[Result]{Output: result, Error: err}
 
