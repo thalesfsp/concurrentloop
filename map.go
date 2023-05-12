@@ -44,7 +44,11 @@ func Map[T any, Result any](ctx context.Context, sl []T, f MapFunc[T, Result]) (
 		}
 	}
 
-	return results, errs
+	if len(errs) > 0 {
+		return nil, errs
+	}
+
+	return results, nil
 }
 
 // MapCh calls the `Func` concurrently on each element of `sl`, and returns a
