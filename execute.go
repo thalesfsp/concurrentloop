@@ -24,6 +24,8 @@ type ExecuteFunc[T any] func(context.Context) (T, error)
 
 // Execute calls the `fns` concurrently, and returns the results and any errors
 // that occurred. The function blocks until all executions have completed.
+//
+// NOTE: Order is may preserved.
 func Execute[T any](ctx context.Context, fns []ExecuteFunc[T]) ([]T, Errors) {
 	// Calls runCh, and closes the channel.
 	resultsCh := ExecuteCh(ctx, fns)

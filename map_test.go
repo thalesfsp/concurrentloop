@@ -9,6 +9,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestNew_ConcurrentProcessing(t *testing.T) {
@@ -57,20 +59,15 @@ func TestNew_ConcurrentProcessing(t *testing.T) {
 	}
 
 	// Check the results.
-	if len(r1) != len(sl1) {
-		t.Errorf("ConcurrentProcessing() len(r1.Results) = %v, want %v", len(r1), len(sl1))
-		return
-	}
-	if len(r2) != len(sl2) {
-		t.Errorf("ConcurrentProcessing() len(r2.Results) = %v, want %v", len(r2), len(sl2))
-		return
-	}
-	if len(r3) != len(sl3) {
-		t.Errorf("ConcurrentProcessing() len(r3.Results) = %v, want %v", len(r3), len(sl3))
-		return
-	}
-	if len(r4) != 0 {
-		t.Errorf("ConcurrentProcessing() len(r4.Results) = %v, want %v", len(r4), len(sl2))
-		return
-	}
+	assert.Equal(t, r1, []int{2, 4, 6, 8, 10})
+	assert.Equal(t, len(r1), len(sl1))
+
+	assert.Equal(t, r2, []string{"aa", "bb", "cc", "dd", "ee"})
+	assert.Equal(t, len(r2), len(sl2))
+
+	assert.Equal(t, r3, []float64{2.2, 4.4, 6.6, 8.8, 11})
+	assert.Equal(t, len(r3), len(sl3))
+
+	assert.Nil(t, r4)
+	assert.Equal(t, 0, len(r4))
 }

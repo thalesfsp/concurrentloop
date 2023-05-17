@@ -10,6 +10,7 @@ package concurrentloop
 
 // ResultCh receives the result from the channel.
 type ResultCh[T any] struct {
-	Output T
 	Error  error
+	Index  int
+	Output T
 }

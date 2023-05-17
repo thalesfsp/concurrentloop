@@ -24,15 +24,15 @@ type MapFunc[T any, Result any] func(context.Context, T) (Result, error)
 // Map calls the `Func` concurrently on each element of `sl`, and returns the
 // results and any errors that occurred. The function blocks until all
 // executions have completed.
+//
+// NOTE: Order is preserved.
 func Map[T any, Result any](ctx context.Context, sl []T, f MapFunc[T, Result]) ([]Result, Errors) {
-	// Calls runCh, and closes the channel.
+	// Calls MapCh, and closes the channel.
 	resultsCh := MapCh(ctx, sl, f)
 	defer close(resultsCh)
 
-	var (
-		results []Result
-		errs    []error
-	)
+	results := make([]Result, len(sl))
+	var errs []error
 
 	for range sl {
 		result := <-resultsCh
@@ -40,7 +40,7 @@ func Map[T any, Result any](ctx context.Context, sl []T, f MapFunc[T, Result]) (
 		if result.Error != nil {
 			errs = append(errs, result.Error)
 		} else {
-			results = append(results, result.Output)
+			results[result.Index] = result.Output
 		}
 	}
 
@@ -52,7 +52,7 @@ func Map[T any, Result any](ctx context.Context, sl []T, f MapFunc[T, Result]) (
 }
 
 // MapCh calls the `Func` concurrently on each element of `sl`, and returns a
-// channel that receives the results. The results are returned as a `resultCh`
+// channel that receives the results. The results are returned as an `ResultCh`
 // struct, which contains the output value and an error value if the function
 // call failed.
 //
@@ -60,19 +60,20 @@ func Map[T any, Result any](ctx context.Context, sl []T, f MapFunc[T, Result]) (
 func MapCh[T any, Result any](ctx context.Context, sl []T, f MapFunc[T, Result]) chan ResultCh[Result] {
 	resultsCh := make(chan ResultCh[Result])
 
-	for _, t := range sl {
+	for i, t := range sl {
 		t := t
+		i := i
 
-		go func(t T) {
+		go func(i int, t T) {
 			result, err := f(ctx, t)
 			if err != nil {
-				resultsCh <- ResultCh[Result]{Output: result, Error: err}
+				resultsCh <- ResultCh[Result]{Index: i, Output: result, Error: err}
 
 				return
 			}
 
-			resultsCh <- ResultCh[Result]{Output: result, Error: nil}
-		}(t)
+			resultsCh <- ResultCh[Result]{Index: i, Output: result, Error: nil}
+		}(i, t)
 	}
 
 	return resultsCh
