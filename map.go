@@ -32,6 +32,7 @@ func Map[T any, Result any](ctx context.Context, sl []T, f MapFunc[T, Result]) (
 	defer close(resultsCh)
 
 	results := make([]Result, len(sl))
+
 	var errs []error
 
 	for range sl {
