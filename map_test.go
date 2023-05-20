@@ -17,6 +17,7 @@ func TestNew_ConcurrentProcessing(t *testing.T) {
 	sl1 := []int{1, 2, 3, 4, 5}
 	sl2 := []string{"a", "b", "c", "d", "e"}
 	sl3 := []float64{1.1, 2.2, 3.3, 4.4, 5.5}
+	sl5 := []string{}
 
 	// Create a function that will be called concurrently.
 	cF1 := func(ctx context.Context, i int) (int, error) {
@@ -32,7 +33,15 @@ func TestNew_ConcurrentProcessing(t *testing.T) {
 	}
 
 	cF4 := func(ctx context.Context, s string) (string, error) {
-		return "", errors.New("error")
+		if s == "c" {
+			return "", errors.New("error")
+		}
+
+		return s, nil
+	}
+
+	cF5 := func(ctx context.Context, s string) (string, error) {
+		return s, nil
 	}
 
 	// Call the function concurrently.
@@ -40,6 +49,7 @@ func TestNew_ConcurrentProcessing(t *testing.T) {
 	r2, err2 := Map(context.Background(), sl2, cF2)
 	r3, err3 := Map(context.Background(), sl3, cF3)
 	r4, err4 := Map(context.Background(), sl2, cF4, WithConcurrency(1))
+	r5, err5 := Map(context.Background(), sl5, cF5, WithConcurrency(1))
 
 	if err1 != nil {
 		t.Errorf("ConcurrentProcessing() error = %v", err1)
@@ -57,6 +67,10 @@ func TestNew_ConcurrentProcessing(t *testing.T) {
 		t.Errorf("ConcurrentProcessing() error = %v", err4)
 		return
 	}
+	if err5 != nil {
+		t.Errorf("ConcurrentProcessing() error = %v", err5)
+		return
+	}
 
 	// Check the results.
 	assert.Equal(t, r1, []int{2, 4, 6, 8, 10})
@@ -68,8 +82,11 @@ func TestNew_ConcurrentProcessing(t *testing.T) {
 	assert.Equal(t, r3, []float64{2.2, 4.4, 6.6, 8.8, 11})
 	assert.Equal(t, len(r3), len(sl3))
 
-	assert.Nil(t, r4)
-	assert.Equal(t, 0, len(r4))
+	assert.Equal(t, r4, []string{"a", "b", "d", "e", "e"})
+	assert.Equal(t, 5, len(r4))
+
+	assert.Equal(t, r5, []string{})
+	assert.Equal(t, 0, len(r5))
 }
 
 func TestNew_ConcurrentProcessing_1(t *testing.T) {

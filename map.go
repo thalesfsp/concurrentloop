@@ -6,8 +6,12 @@ package concurrentloop
 
 import (
 	"context"
+	"fmt"
+	"reflect"
 	"runtime"
+	"sync"
 
+	"github.com/thalesfsp/customerror"
 	"golang.org/x/sync/semaphore"
 )
 
@@ -24,82 +28,52 @@ type MapFunc[T any, Result any] func(context.Context, T) (Result, error)
 // Exported functionalities.
 //////
 
-// Map calls the `Func` concurrently on each element of `sl`, and returns the
-// results and any errors that occurred.
+func IsZeroOfUnderlyingType(x interface{}) bool {
+	return reflect.DeepEqual(x, reflect.Zero(reflect.TypeOf(x)).Interface())
+}
+
+// Map concurrently applies a function `f` to each element in the slice `sl` and
+// returns the resulting slice and any errors that occurred. `f` should be of
+// type  MapFunc, a function which takes a context and an element of type `T`
+// and  returns a result of type `Result` and an error.
 //
-// NOTE: For more info. see the `MapCh` function.
+// The function takes an optional number of `Func` options that allow you to
+// customize the behavior of the function.
 //
-// NOTE: Order is preserved.
+// If an error occurs during execution of `f`, it is stored and returned along
+// with the results. The order of the results matches the order of the input
+// slice.
+//
+// If any of the operations are cancelled by the context, the function will
+// panic.
+//
+// Usage example:
+//
+//	type MyStruct struct { ... }
+//
+//	func process(ctx context.Context, s MyStruct) (ResultType, error) { ... }
+//
+//	sl := []MyStruct{...}
+//	ctx := context.Background()
+//	results, errs := Map(ctx, sl, process)
+//
+//	if errs != nil {
+//	    // handle errors
+//	}
+//
+//	// process results
+//
+// Note: Because the function executes concurrently, the functions you provide must
+// be safe for concurrent use.
 func Map[T any, Result any](
 	ctx context.Context,
 	sl []T,
 	f MapFunc[T, Result],
 	opts ...Func,
-) ([]Result, Errors) {
-	// Calls MapCh, and closes the channel.
-	resultsCh := MapCh(ctx, sl, f, opts...)
-	defer close(resultsCh)
-
-	results := make([]Result, len(sl))
-
-	var errs []error
-
-	for range sl {
-		result := <-resultsCh
-
-		if result.Error != nil {
-			errs = append(errs, result.Error)
-		} else {
-			results[result.Index] = result.Output
-		}
-	}
-
-	if len(errs) > 0 {
-		return nil, errs
-	}
-
-	return results, nil
-}
-
-// MapCh is a generic function in Go that applies a function concurrently to
-// each element in a slice and sends the results via a channel. It uses a
-// semaphore to control the concurrency level.
-//
-// The function takes four parameters:
-// - ctx: A context.Context which is used to control the cancellation of the
-// computation.
-// - concurrency: An int64 that represents the maximum number of concurrent
-// goroutines that can run. If set to 0 or -1, it will use the runtime.NumCPU().
-// - sl: A slice of elements of type T. The function will be applied to each of
-// these elements.
-// - f: A MapFunc function that takes a context and an element of type T and
-// returns a Result of type any and an error.
-//
-// The function returns a channel which will receive a ResultCh struct
-// containing three fields:
-// - Index: The index of the input slice that the Result corresponds to.
-// - Output: The Result of applying the function f to the corresponding element
-// of the input slice.
-// - Error: Any error that occurred while applying the function f.
-//
-// The function uses a semaphore to limit the number of goroutines that can run
-// concurrently. Each goroutine applies the function f to an element of the
-// input slice and sends the result via the resultsCh channel. If the context is
-// cancelled or the semaphore cannot be acquired, an error is sent via the
-// resultsCh channel. If an error occurs while applying the function f, the
-// error is also sent via the resultsCh channel.
-//
-// NOTE: that the function does not close the resultsCh channel. It is the
-// responsibility of the caller to ensure that all results are read from the
-// channel to avoid a goroutine leak.
-func MapCh[T any, Result any](
-	ctx context.Context,
-	sl []T,
-	f MapFunc[T, Result],
-	opts ...Func,
-) chan ResultCh[Result] {
+) ([]Result, []error) {
 	o := Option{
-		Concurrency: runtime.GOMAXPROCS(0),
+		Concurrency:      runtime.GOMAXPROCS(0),
+		RemoveZeroValues: true,
 	}
 
 	// Apply the options.
@@ -109,42 +83,69 @@ func MapCh[T any, Result any](
 
 	sem := semaphore.NewWeighted(int64(o.Concurrency))
 
-	resultsCh := make(chan ResultCh[Result])
+	wg := &sync.WaitGroup{}
 
-	for i, t := range sl {
-		t := t
-		i := i
-		sem := sem
+	results := make([]Result, len(sl))
 
-		if err := sem.Acquire(ctx, 1); err != nil {
-			resultsCh <- ResultCh[Result]{Index: i, Error: err}
+	defer func() {
+		if o.RemoveZeroValues {
+			// Iterate over results dropping nil values.
+			// This is necessary because the results slice is initialized with
+			for i := 0; i < len(results); i++ {
+				// Use reflection against Result type to check if the value is nil.
+				if IsZeroOfUnderlyingType(results[i]) {
+					results = append(results[:i], results[i+1:]...)
+					i--
+				}
+			}
+		}
+	}()
 
-			return resultsCh
+	var (
+		errs     []error
+		errMutex sync.Mutex
+	)
+
+	for i := range sl {
+		// Check if the context is done
+		if ctx.Err() != nil {
+			return results, errs
 		}
 
-		go func(i int, t T) {
-			result, err := f(ctx, t)
-			if err != nil {
-				sem.Release(1)
+		if err := sem.Acquire(ctx, 1); err != nil {
+			return results, errs
+		}
 
-				resultsCh <- ResultCh[Result]{Index: i, Output: result, Error: err}
+		wg.Add(1)
+
+		go func(i int) {
+			defer sem.Release(1)
+			defer wg.Done()
+
+			res, err := f(ctx, sl[i])
+			if err != nil {
+				errMutex.Lock()
+
+				errs = append(errs, customerror.New(
+					fmt.Sprintf("failed to map %v", sl[i]),
+					customerror.WithError(err),
+				))
+
+				errMutex.Unlock()
 
 				return
 			}
 
-			sem.Release(1)
-
-			resultsCh <- ResultCh[Result]{Index: i, Output: result, Error: nil}
-		}(i, t)
+			results[i] = res
+		}(i)
 	}
 
-	// Acquire all of the tokens to wait for any remaining workers to finish.
-	//
-	// If you are already waiting for the workers by some other means (such as an
-	// errgroup.Group), you can omit this final Acquire call.
-	if err := sem.Acquire(ctx, int64(o.Concurrency)); err != nil {
-		return resultsCh
+	// Wait for all goroutines to finish
+	wg.Wait()
+
+	if len(errs) > 0 {
+		return results, errs
 	}
 
-	return resultsCh
+	return results, nil
 }

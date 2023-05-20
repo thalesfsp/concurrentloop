@@ -11,16 +11,28 @@ type Func func(o Option) Option
 type Option struct {
 	// Concurrency is the number of concurrent goroutines that will be used.
 	Concurrency int
+
+	// RemoveZeroValues indicates whether to remove zero values from the results.
+	RemoveZeroValues bool
 }
 
 //////
 // Built-in options.
 //////
 
-// WithConcurrency sets the OnFinished function.
+// WithConcurrency sets the concurrency.
 func WithConcurrency(concurrency int) Func {
 	return func(o Option) Option {
 		o.Concurrency = concurrency
+
+		return o
+	}
+}
+
+// RemoveZeroValues if set to true removes zero values from the results.
+func RemoveZeroValues(remove bool) Func {
+	return func(o Option) Option {
+		o.RemoveZeroValues = remove
 
 		return o
 	}
