@@ -70,7 +70,7 @@ func Map[T any, Result any](
 	sl []T,
 	f MapFunc[T, Result],
 	opts ...Func,
-) ([]Result, []error) {
+) ([]Result, Errors) {
 	o := Option{
 		Concurrency:      runtime.GOMAXPROCS(0),
 		RemoveZeroValues: true,
