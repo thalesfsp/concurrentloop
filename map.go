@@ -99,7 +99,7 @@ func MapCh[T any, Result any](
 	opts ...Func,
 ) chan ResultCh[Result] {
 	o := Option{
-		Concurrency: runtime.NumCPU(),
+		Concurrency: runtime.GOMAXPROCS(0),
 	}
 
 	// Apply the options.
@@ -123,17 +123,27 @@ func MapCh[T any, Result any](
 		}
 
 		go func(i int, t T) {
-			defer sem.Release(1)
-
 			result, err := f(ctx, t)
 			if err != nil {
+				sem.Release(1)
+
 				resultsCh <- ResultCh[Result]{Index: i, Output: result, Error: err}
 
 				return
 			}
 
+			sem.Release(1)
+
 			resultsCh <- ResultCh[Result]{Index: i, Output: result, Error: nil}
 		}(i, t)
+	}
+
+	// Acquire all of the tokens to wait for any remaining workers to finish.
+	//
+	// If you are already waiting for the workers by some other means (such as an
+	// errgroup.Group), you can omit this final Acquire call.
+	if err := sem.Acquire(ctx, int64(o.Concurrency)); err != nil {
+		return resultsCh
 	}
 
 	return resultsCh

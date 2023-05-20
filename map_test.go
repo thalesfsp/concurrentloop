@@ -39,7 +39,7 @@ func TestNew_ConcurrentProcessing(t *testing.T) {
 	r1, err1 := Map(context.Background(), sl1, cF1)
 	r2, err2 := Map(context.Background(), sl2, cF2)
 	r3, err3 := Map(context.Background(), sl3, cF3)
-	r4, err4 := Map(context.Background(), sl2, cF4)
+	r4, err4 := Map(context.Background(), sl2, cF4, WithConcurrency(1))
 
 	if err1 != nil {
 		t.Errorf("ConcurrentProcessing() error = %v", err1)
@@ -70,4 +70,25 @@ func TestNew_ConcurrentProcessing(t *testing.T) {
 
 	assert.Nil(t, r4)
 	assert.Equal(t, 0, len(r4))
+}
+
+func TestNew_ConcurrentProcessing_1(t *testing.T) {
+	sl1 := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+
+	// Create a function that will be called concurrently.
+	cF1 := func(ctx context.Context, i int) (int, error) {
+		return i * 2, nil
+	}
+
+	// Call the function concurrently.
+	r1, err1 := Map(context.Background(), sl1, cF1, WithConcurrency(3))
+
+	if err1 != nil {
+		t.Errorf("ConcurrentProcessing() error = %v", err1)
+		return
+	}
+
+	// Check the results.
+	assert.Equal(t, []int{2, 4, 6, 8, 10, 12, 14, 16, 18, 20}, r1)
+	assert.Equal(t, len(r1), len(sl1))
 }
