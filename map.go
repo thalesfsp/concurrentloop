@@ -28,8 +28,23 @@ type MapFunc[T any, Result any] func(context.Context, T) (Result, error)
 // Exported functionalities.
 //////
 
-func IsZeroOfUnderlyingType(x interface{}) bool {
+// isZeroOfUnderlyingType checks if the value is the zero value of its type
+func isZeroOfUnderlyingType(x interface{}) bool {
 	return reflect.DeepEqual(x, reflect.Zero(reflect.TypeOf(x)).Interface())
+}
+
+// RemoveZeroValues removes zero values from the results.
+func RemoveZeroValues[T any](removeZeroValues bool, results []T) []T {
+	if removeZeroValues {
+		for i := 0; i < len(results); i++ {
+			if isZeroOfUnderlyingType(results[i]) {
+				results = append(results[:i], results[i+1:]...)
+				i--
+			}
+		}
+	}
+
+	return results
 }
 
 // Map concurrently applies a function `f` to each element in the slice `sl` and
@@ -76,7 +91,6 @@ func Map[T any, Result any](
 		RemoveZeroValues: true,
 	}
 
-	// Apply the options.
 	for _, opt := range opts {
 		o = opt(o)
 	}
@@ -87,33 +101,22 @@ func Map[T any, Result any](
 
 	results := make([]Result, len(sl))
 
-	defer func() {
-		if o.RemoveZeroValues {
-			// Iterate over results dropping nil values.
-			// This is necessary because the results slice is initialized with
-			for i := 0; i < len(results); i++ {
-				// Use reflection against Result type to check if the value is nil.
-				if IsZeroOfUnderlyingType(results[i]) {
-					results = append(results[:i], results[i+1:]...)
-					i--
-				}
-			}
-		}
-	}()
-
 	var (
 		errs     []error
 		errMutex sync.Mutex
 	)
 
 	for i := range sl {
-		// Check if the context is done
 		if ctx.Err() != nil {
-			return results, errs
+			errs = append(errs, customerror.New(fmt.Sprintf(`context errored before mapping "%v"`, sl[i])))
+
+			return RemoveZeroValues(o.RemoveZeroValues, results), errs
 		}
 
 		if err := sem.Acquire(ctx, 1); err != nil {
-			return results, errs
+			errs = append(errs, customerror.New(fmt.Sprintf(`context timeout before mapping "%v"`, sl[i])))
+
+			return RemoveZeroValues(o.RemoveZeroValues, results), errs
 		}
 
 		wg.Add(1)
@@ -136,16 +139,28 @@ func Map[T any, Result any](
 				return
 			}
 
+			// Check if result i exists
+			if len(results) <= i {
+				errMutex.Lock()
+				defer errMutex.Unlock()
+
+				errs = append(errs, customerror.New(
+					fmt.Sprintf("failed to map %v", sl[i]),
+					customerror.WithError(fmt.Errorf("result index %v out of range", i)),
+				))
+
+				return
+			}
+
 			results[i] = res
 		}(i)
 	}
 
-	// Wait for all goroutines to finish
 	wg.Wait()
 
 	if len(errs) > 0 {
-		return results, errs
+		return RemoveZeroValues(o.RemoveZeroValues, results), errs
 	}
 
-	return results, nil
+	return RemoveZeroValues(o.RemoveZeroValues, results), nil
 }

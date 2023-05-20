@@ -29,8 +29,8 @@ func WithConcurrency(concurrency int) Func {
 	}
 }
 
-// RemoveZeroValues if set to true removes zero values from the results.
-func RemoveZeroValues(remove bool) Func {
+// WithRemoveZeroValues if set to true removes zero values from the results.
+func WithRemoveZeroValues(remove bool) Func {
 	return func(o Option) Option {
 		o.RemoveZeroValues = remove
 

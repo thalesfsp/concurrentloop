@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -44,12 +45,28 @@ func TestNew_ConcurrentProcessing(t *testing.T) {
 		return s, nil
 	}
 
+	cF6 := func(ctx context.Context, s string) (string, error) {
+		if s == "c" {
+			time.Sleep(2 * time.Second)
+
+			return s, nil
+		}
+
+		return s, nil
+	}
+
 	// Call the function concurrently.
 	r1, err1 := Map(context.Background(), sl1, cF1)
 	r2, err2 := Map(context.Background(), sl2, cF2)
 	r3, err3 := Map(context.Background(), sl3, cF3)
 	r4, err4 := Map(context.Background(), sl2, cF4, WithConcurrency(1))
 	r5, err5 := Map(context.Background(), sl5, cF5, WithConcurrency(1))
+
+	// Call the function concurrently.
+	ctxWithTimeout, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
+	r6, err6 := Map(ctxWithTimeout, sl2, cF6, WithConcurrency(1))
 
 	if err1 != nil {
 		t.Errorf("ConcurrentProcessing() error = %v", err1)
@@ -82,11 +99,15 @@ func TestNew_ConcurrentProcessing(t *testing.T) {
 	assert.Equal(t, r3, []float64{2.2, 4.4, 6.6, 8.8, 11})
 	assert.Equal(t, len(r3), len(sl3))
 
-	assert.Equal(t, r4, []string{"a", "b", "d", "e", "e"})
-	assert.Equal(t, 5, len(r4))
+	assert.Equal(t, r4, []string{"a", "b", "d", "e"})
+	assert.Equal(t, 4, len(r4))
+	assert.ErrorContains(t, err4, "error")
 
 	assert.Equal(t, r5, []string{})
 	assert.Equal(t, 0, len(r5))
+
+	assert.Equal(t, []string{"a", "b"}, r6)
+	assert.ErrorContains(t, err6, `context timeout before mapping "d"`)
 }
 
 func TestNew_ConcurrentProcessing_1(t *testing.T) {
