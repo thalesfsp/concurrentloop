@@ -6,6 +6,9 @@ package concurrentloop
 
 import (
 	"context"
+	"runtime"
+
+	"golang.org/x/sync/semaphore"
 )
 
 //////
@@ -22,13 +25,19 @@ type MapFunc[T any, Result any] func(context.Context, T) (Result, error)
 //////
 
 // Map calls the `Func` concurrently on each element of `sl`, and returns the
-// results and any errors that occurred. The function blocks until all
-// executions have completed.
+// results and any errors that occurred.
+//
+// NOTE: For more info. see the `MapCh` function.
 //
 // NOTE: Order is preserved.
-func Map[T any, Result any](ctx context.Context, sl []T, f MapFunc[T, Result]) ([]Result, Errors) {
+func Map[T any, Result any](
+	ctx context.Context,
+	sl []T,
+	f MapFunc[T, Result],
+	opts ...Func,
+) ([]Result, Errors) {
 	// Calls MapCh, and closes the channel.
-	resultsCh := MapCh(ctx, sl, f)
+	resultsCh := MapCh(ctx, sl, f, opts...)
 	defer close(resultsCh)
 
 	results := make([]Result, len(sl))
@@ -52,20 +61,70 @@ func Map[T any, Result any](ctx context.Context, sl []T, f MapFunc[T, Result]) (
 	return results, nil
 }
 
-// MapCh calls the `Func` concurrently on each element of `sl`, and returns a
-// channel that receives the results. The results are returned as an `ResultCh`
-// struct, which contains the output value and an error value if the function
-// call failed.
+// MapCh is a generic function in Go that applies a function concurrently to
+// each element in a slice and sends the results via a channel. It uses a
+// semaphore to control the concurrency level.
 //
-// NOTE: It's the caller's responsibility to close the channel.
-func MapCh[T any, Result any](ctx context.Context, sl []T, f MapFunc[T, Result]) chan ResultCh[Result] {
+// The function takes four parameters:
+// - ctx: A context.Context which is used to control the cancellation of the
+// computation.
+// - concurrency: An int64 that represents the maximum number of concurrent
+// goroutines that can run. If set to 0 or -1, it will use the runtime.NumCPU().
+// - sl: A slice of elements of type T. The function will be applied to each of
+// these elements.
+// - f: A MapFunc function that takes a context and an element of type T and
+// returns a Result of type any and an error.
+//
+// The function returns a channel which will receive a ResultCh struct
+// containing three fields:
+// - Index: The index of the input slice that the Result corresponds to.
+// - Output: The Result of applying the function f to the corresponding element
+// of the input slice.
+// - Error: Any error that occurred while applying the function f.
+//
+// The function uses a semaphore to limit the number of goroutines that can run
+// concurrently. Each goroutine applies the function f to an element of the
+// input slice and sends the result via the resultsCh channel. If the context is
+// cancelled or the semaphore cannot be acquired, an error is sent via the
+// resultsCh channel. If an error occurs while applying the function f, the
+// error is also sent via the resultsCh channel.
+//
+// NOTE: that the function does not close the resultsCh channel. It is the
+// responsibility of the caller to ensure that all results are read from the
+// channel to avoid a goroutine leak.
+func MapCh[T any, Result any](
+	ctx context.Context,
+	sl []T,
+	f MapFunc[T, Result],
+	opts ...Func,
+) chan ResultCh[Result] {
+	o := Option{
+		Concurrency: runtime.NumCPU(),
+	}
+
+	// Apply the options.
+	for _, opt := range opts {
+		o = opt(o)
+	}
+
+	sem := semaphore.NewWeighted(int64(o.Concurrency))
+
 	resultsCh := make(chan ResultCh[Result])
 
 	for i, t := range sl {
 		t := t
 		i := i
+		sem := sem
+
+		if err := sem.Acquire(ctx, 1); err != nil {
+			resultsCh <- ResultCh[Result]{Index: i, Error: err}
+
+			return resultsCh
+		}
 
 		go func(i int, t T) {
+			defer sem.Release(1)
+
 			result, err := f(ctx, t)
 			if err != nil {
 				resultsCh <- ResultCh[Result]{Index: i, Output: result, Error: err}
