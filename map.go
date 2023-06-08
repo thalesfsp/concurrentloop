@@ -164,7 +164,7 @@ func Map[T any, Result any](
 			// defer resMutex.Unlock()
 
 			if o.Limit > 0 {
-				if resultTracker > uint64(o.Limit) {
+				if atomic.LoadUint64(&resultTracker) > uint64(o.Limit) {
 					return
 				}
 			}
