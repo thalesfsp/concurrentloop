@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"runtime"
 	"sync"
+	"sync/atomic"
 
 	"github.com/thalesfsp/customerror"
 	"golang.org/x/sync/semaphore"
@@ -28,7 +29,7 @@ type MapFunc[T any, Result any] func(context.Context, T) (Result, error)
 // Exported functionalities.
 //////
 
-// isZeroOfUnderlyingType checks if the value is the zero value of its type
+// isZeroOfUnderlyingType checks if the value is the zero value.
 func isZeroOfUnderlyingType(x interface{}) bool {
 	return reflect.DeepEqual(x, reflect.Zero(reflect.TypeOf(x)).Interface())
 }
@@ -104,9 +105,17 @@ func Map[T any, Result any](
 	var (
 		errs     []error
 		errMutex sync.Mutex
+
+		resultTracker uint64 = 1
 	)
 
 	for i := range sl {
+		if o.Limit > 0 {
+			if atomic.LoadUint64(&resultTracker) > uint64(o.Limit) {
+				break
+			}
+		}
+
 		if ctx.Err() != nil {
 			errs = append(errs, customerror.New(fmt.Sprintf(`context errored before mapping "%v"`, sl[i])))
 
@@ -128,13 +137,12 @@ func Map[T any, Result any](
 			res, err := f(ctx, sl[i])
 			if err != nil {
 				errMutex.Lock()
+				defer errMutex.Unlock()
 
 				errs = append(errs, customerror.New(
 					fmt.Sprintf("failed to map %v", sl[i]),
 					customerror.WithError(err),
 				))
-
-				errMutex.Unlock()
 
 				return
 			}
@@ -152,7 +160,18 @@ func Map[T any, Result any](
 				return
 			}
 
+			// resMutex.Lock()
+			// defer resMutex.Unlock()
+
+			if o.Limit > 0 {
+				if resultTracker > uint64(o.Limit) {
+					return
+				}
+			}
+
 			results[i] = res
+
+			atomic.AddUint64(&resultTracker, 1)
 		}(i)
 	}
 

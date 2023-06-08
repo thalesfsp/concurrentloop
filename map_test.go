@@ -110,7 +110,7 @@ func TestNew_ConcurrentProcessing(t *testing.T) {
 	assert.ErrorContains(t, err6, `context timeout before mapping "d"`)
 }
 
-func TestNew_ConcurrentProcessing_1(t *testing.T) {
+func TestNew_ConcurrentProcessing_WithConcurrency(t *testing.T) {
 	sl1 := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
 
 	// Create a function that will be called concurrently.
@@ -129,4 +129,24 @@ func TestNew_ConcurrentProcessing_1(t *testing.T) {
 	// Check the results.
 	assert.Equal(t, []int{2, 4, 6, 8, 10, 12, 14, 16, 18, 20}, r1)
 	assert.Equal(t, len(r1), len(sl1))
+}
+
+func TestNew_ConcurrentProcessing_WithLimit(t *testing.T) {
+	sl1 := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+
+	// Create a function that will be called concurrently.
+	cF1 := func(ctx context.Context, i int) (int, error) {
+		return i * 2, nil
+	}
+
+	// Call the function concurrently.
+	r1, err1 := Map(context.Background(), sl1, cF1, WithLimit(3))
+
+	if err1 != nil {
+		t.Errorf("ConcurrentProcessing() error = %v", err1)
+		return
+	}
+
+	// Check the results.
+	assert.Equal(t, 3, len(r1))
 }

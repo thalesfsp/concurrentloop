@@ -12,6 +12,9 @@ type Option struct {
 	// Concurrency is the number of concurrent goroutines that will be used.
 	Concurrency int
 
+	// The max amount of results to collect before
+	Limit int
+
 	// RemoveZeroValues indicates whether to remove zero values from the results.
 	RemoveZeroValues bool
 }
@@ -33,6 +36,15 @@ func WithConcurrency(concurrency int) Func {
 func WithRemoveZeroValues(remove bool) Func {
 	return func(o Option) Option {
 		o.RemoveZeroValues = remove
+
+		return o
+	}
+}
+
+// WithLimit sets the max amount of results to collect before stopping the loop.
+func WithLimit(limit int) Func {
+	return func(o Option) Option {
+		o.Limit = limit
 
 		return o
 	}
