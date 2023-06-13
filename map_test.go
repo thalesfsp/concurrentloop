@@ -150,3 +150,37 @@ func TestNew_ConcurrentProcessing_WithLimit(t *testing.T) {
 	// Check the results.
 	assert.Equal(t, 3, len(r1))
 }
+
+func TestMapM(t *testing.T) {
+	type TestStruct struct{ A string }
+
+	got, errs := MapM(context.Background(), map[string]TestStruct{
+		"1": {A: "a"},
+		"2": {A: "b"},
+		"3": {A: "c"},
+	}, func(ctx context.Context, key string, item TestStruct) (string, error) {
+		return key, nil
+	})
+	if errs != nil {
+		t.Fatalf("MapX() error = %v", errs)
+	}
+
+	assert.Len(t, got, 3)
+}
+
+func TestMapM_withOptions(t *testing.T) {
+	type TestStruct struct{ A string }
+
+	got, errs := MapM(context.Background(), map[string]TestStruct{
+		"1": {A: "a"},
+		"2": {A: "b"},
+		"3": {A: "c"},
+	}, func(ctx context.Context, key string, item TestStruct) (string, error) {
+		return key, nil
+	}, WithLimit(2))
+	if errs != nil {
+		t.Fatalf("MapX() error = %v", errs)
+	}
+
+	assert.Len(t, got, 2)
+}

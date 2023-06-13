@@ -23,7 +23,11 @@ import (
 // MapFunc is the type of the function that will be executed concurrently for each
 // element in a slice of type `T`. The function takes a `context.Context` and a
 // value of type `T`, and returns a value of type `Result` and an error value.
-type MapFunc[T any, Result any] func(context.Context, T) (Result, error)
+type MapFunc[T any, Result any] func(ctx context.Context, item T) (Result, error)
+
+// MapMFunc is the type of the function that will be executed concurrently for
+// each element in the map.
+type MapMFunc[T any, Result any] func(ctx context.Context, key string, item T) (Result, error)
 
 //////
 // Exported functionalities.
@@ -48,10 +52,9 @@ func RemoveZeroValues[T any](removeZeroValues bool, results []T) []T {
 	return results
 }
 
-// Map concurrently applies a function `f` to each element in the slice `sl` and
-// returns the resulting slice and any errors that occurred. `f` should be of
-// type  MapFunc, a function which takes a context and an element of type `T`
-// and  returns a result of type `Result` and an error.
+// Map concurrently applies a function `f` to each element in the slice `items`
+// and returns the resulting slice and any errors that occurred. `f` should be of
+// type MapFunc.
 //
 // The function takes an optional number of `Func` options that allow you to
 // customize the behavior of the function.
@@ -69,9 +72,9 @@ func RemoveZeroValues[T any](removeZeroValues bool, results []T) []T {
 //
 //	func process(ctx context.Context, s MyStruct) (ResultType, error) { ... }
 //
-//	sl := []MyStruct{...}
+//	items := []MyStruct{...}
 //	ctx := context.Background()
-//	results, errs := Map(ctx, sl, process)
+//	results, errs := Map(ctx, items, process)
 //
 //	if errs != nil {
 //	    // handle errors
@@ -83,7 +86,7 @@ func RemoveZeroValues[T any](removeZeroValues bool, results []T) []T {
 // be safe for concurrent use.
 func Map[T any, Result any](
 	ctx context.Context,
-	sl []T,
+	items []T,
 	f MapFunc[T, Result],
 	opts ...Func,
 ) ([]Result, Errors) {
@@ -100,7 +103,7 @@ func Map[T any, Result any](
 
 	wg := &sync.WaitGroup{}
 
-	results := make([]Result, len(sl))
+	results := make([]Result, len(items))
 
 	var (
 		errs     []error
@@ -109,7 +112,7 @@ func Map[T any, Result any](
 		resultTracker uint64 = 1
 	)
 
-	for i := range sl {
+	for i := range items {
 		if o.Limit > 0 {
 			if atomic.LoadUint64(&resultTracker) > uint64(o.Limit) {
 				break
@@ -117,13 +120,13 @@ func Map[T any, Result any](
 		}
 
 		if ctx.Err() != nil {
-			errs = append(errs, customerror.New(fmt.Sprintf(`context errored before mapping "%v"`, sl[i])))
+			errs = append(errs, customerror.New(fmt.Sprintf(`context errored before mapping "%v"`, items[i])))
 
 			return RemoveZeroValues(o.RemoveZeroValues, results), errs
 		}
 
 		if err := sem.Acquire(ctx, 1); err != nil {
-			errs = append(errs, customerror.New(fmt.Sprintf(`context timeout before mapping "%v"`, sl[i])))
+			errs = append(errs, customerror.New(fmt.Sprintf(`context timeout before mapping "%v"`, items[i])))
 
 			return RemoveZeroValues(o.RemoveZeroValues, results), errs
 		}
@@ -134,13 +137,13 @@ func Map[T any, Result any](
 			defer sem.Release(1)
 			defer wg.Done()
 
-			res, err := f(ctx, sl[i])
+			res, err := f(ctx, items[i])
 			if err != nil {
 				errMutex.Lock()
 				defer errMutex.Unlock()
 
 				errs = append(errs, customerror.New(
-					fmt.Sprintf("failed to map %v", sl[i]),
+					fmt.Sprintf("failed to map %v", items[i]),
 					customerror.WithError(err),
 				))
 
@@ -153,7 +156,7 @@ func Map[T any, Result any](
 				defer errMutex.Unlock()
 
 				errs = append(errs, customerror.New(
-					fmt.Sprintf("failed to map %v", sl[i]),
+					fmt.Sprintf("failed to map %v", items[i]),
 					customerror.WithError(fmt.Errorf("result index %v out of range", i)),
 				))
 
@@ -173,6 +176,107 @@ func Map[T any, Result any](
 
 			atomic.AddUint64(&resultTracker, 1)
 		}(i)
+	}
+
+	wg.Wait()
+
+	if len(errs) > 0 {
+		return RemoveZeroValues(o.RemoveZeroValues, results), errs
+	}
+
+	return RemoveZeroValues(o.RemoveZeroValues, results), nil
+}
+
+// MapM concurrently applies a function `f` to each element in the map `itemMaps`
+// and returns the resulting slice and any errors that occurred. `f` should be
+// of type MapMFunc.
+func MapM[T any, Result any](
+	ctx context.Context,
+	itemsMap map[string]T,
+	f MapMFunc[T, Result],
+	opts ...Func,
+) ([]Result, Errors) {
+	o := Option{
+		Concurrency:      runtime.GOMAXPROCS(0),
+		RemoveZeroValues: true,
+	}
+
+	for _, opt := range opts {
+		o = opt(o)
+	}
+
+	sem := semaphore.NewWeighted(int64(o.Concurrency))
+
+	wg := &sync.WaitGroup{}
+
+	results := []Result{}
+
+	var (
+		errs     []error
+		errMutex sync.Mutex
+
+		resultTracker uint64 = 1
+	)
+
+	for key, item := range itemsMap {
+		// Limit handling.
+		if o.Limit > 0 {
+			if atomic.LoadUint64(&resultTracker) > uint64(o.Limit) {
+				break
+			}
+		}
+
+		// Context error handling.
+		if ctx.Err() != nil {
+			errs = append(errs, customerror.New(fmt.Sprintf(`context errored before mapping "%v"`, key)))
+
+			return RemoveZeroValues(o.RemoveZeroValues, results), errs
+		}
+
+		// Semaphore handling.
+		if err := sem.Acquire(ctx, 1); err != nil {
+			errs = append(errs, customerror.New(fmt.Sprintf(`context timeout before mapping "%v"`, key)))
+
+			return RemoveZeroValues(o.RemoveZeroValues, results), errs
+		}
+
+		//////
+		// Loop of items.
+		//////
+
+		wg.Add(1)
+
+		go func(k string, i T) {
+			defer sem.Release(1)
+			defer wg.Done()
+
+			res, err := f(ctx, k, i)
+			if err != nil {
+				errMutex.Lock()
+				defer errMutex.Unlock()
+
+				errs = append(errs, customerror.New(
+					fmt.Sprintf("failed to map %v", k),
+					customerror.WithError(err),
+				))
+
+				return
+			}
+
+			// Limit feature.
+			if o.Limit > 0 {
+				if atomic.LoadUint64(&resultTracker) > uint64(o.Limit) {
+					return
+				}
+			}
+
+			errMutex.Lock()
+			defer errMutex.Unlock()
+
+			results = append(results, res)
+
+			atomic.AddUint64(&resultTracker, 1)
+		}(key, item)
 	}
 
 	wg.Wait()
