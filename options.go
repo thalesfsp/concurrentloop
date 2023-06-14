@@ -9,8 +9,8 @@ type Func func(o Option) Option
 
 // Option for the concurrent loop.
 type Option struct {
-	// Concurrency is the number of concurrent goroutines that will be used.
-	Concurrency int
+	// BatchSize is the size of the batch.
+	BatchSize int
 
 	// The max amount of results to collect before
 	Limit int
@@ -23,10 +23,10 @@ type Option struct {
 // Built-in options.
 //////
 
-// WithConcurrency sets the concurrency.
-func WithConcurrency(concurrency int) Func {
+// WithBatchSize sets the size of the batch.
+func WithBatchSize(concurrency int) Func {
 	return func(o Option) Option {
-		o.Concurrency = concurrency
+		o.BatchSize = concurrency
 
 		return o
 	}

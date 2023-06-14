@@ -59,14 +59,14 @@ func TestNew_ConcurrentProcessing(t *testing.T) {
 	r1, err1 := Map(context.Background(), sl1, cF1)
 	r2, err2 := Map(context.Background(), sl2, cF2)
 	r3, err3 := Map(context.Background(), sl3, cF3)
-	r4, err4 := Map(context.Background(), sl2, cF4, WithConcurrency(1))
-	r5, err5 := Map(context.Background(), sl5, cF5, WithConcurrency(1))
+	r4, err4 := Map(context.Background(), sl2, cF4, WithBatchSize(1))
+	r5, err5 := Map(context.Background(), sl5, cF5, WithBatchSize(1))
 
 	// Call the function concurrently.
 	ctxWithTimeout, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
-	r6, err6 := Map(ctxWithTimeout, sl2, cF6, WithConcurrency(1))
+	r6, err6 := Map(ctxWithTimeout, sl2, cF6, WithBatchSize(1))
 
 	if err1 != nil {
 		t.Errorf("ConcurrentProcessing() error = %v", err1)
@@ -119,7 +119,7 @@ func TestNew_ConcurrentProcessing_WithConcurrency(t *testing.T) {
 	}
 
 	// Call the function concurrently.
-	r1, err1 := Map(context.Background(), sl1, cF1, WithConcurrency(3))
+	r1, err1 := Map(context.Background(), sl1, cF1, WithBatchSize(1))
 
 	if err1 != nil {
 		t.Errorf("ConcurrentProcessing() error = %v", err1)

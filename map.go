@@ -91,7 +91,7 @@ func Map[T any, Result any](
 	opts ...Func,
 ) ([]Result, Errors) {
 	o := Option{
-		Concurrency:      runtime.GOMAXPROCS(0),
+		BatchSize:        runtime.NumCPU(),
 		RemoveZeroValues: true,
 	}
 
@@ -99,7 +99,7 @@ func Map[T any, Result any](
 		o = opt(o)
 	}
 
-	sem := semaphore.NewWeighted(int64(o.Concurrency))
+	sem := semaphore.NewWeighted(int64(o.BatchSize))
 
 	wg := &sync.WaitGroup{}
 
@@ -197,7 +197,7 @@ func MapM[T any, Result any](
 	opts ...Func,
 ) ([]Result, Errors) {
 	o := Option{
-		Concurrency:      runtime.GOMAXPROCS(0),
+		BatchSize:        runtime.GOMAXPROCS(0),
 		RemoveZeroValues: true,
 	}
 
@@ -205,7 +205,7 @@ func MapM[T any, Result any](
 		o = opt(o)
 	}
 
-	sem := semaphore.NewWeighted(int64(o.Concurrency))
+	sem := semaphore.NewWeighted(int64(o.BatchSize))
 
 	wg := &sync.WaitGroup{}
 
