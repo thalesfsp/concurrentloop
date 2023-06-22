@@ -86,6 +86,8 @@ func RemoveZeroValues[T any](removeZeroValues bool, results []T) []T {
 //
 // Note: Because the function executes concurrently, the functions you provide must
 // be safe for concurrent use.
+//
+//nolint:funlen,gomnd,gocognit
 func Map[T any, Result any](
 	ctx context.Context,
 	items []T,
@@ -116,7 +118,10 @@ func Map[T any, Result any](
 
 	var rN int64
 
-	if o.RandomDelayTimeMin != 0 || o.RandomDelayTimeMax != 0 && o.RandomDelayTimeMin < o.RandomDelayTimeMax && o.RandomDelayTimeDuration != 0 {
+	if o.RandomDelayTimeMin != 0 ||
+		o.RandomDelayTimeMax != 0 &&
+			o.RandomDelayTimeMin < o.RandomDelayTimeMax &&
+			o.RandomDelayTimeDuration != 0 {
 		r, err := randomness.New(o.RandomDelayTimeMin, o.RandomDelayTimeMax, 3, false)
 		if err != nil {
 			return nil, []error{err}
