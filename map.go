@@ -11,8 +11,10 @@ import (
 	"runtime"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/thalesfsp/customerror"
+	"github.com/thalesfsp/randomness"
 	"golang.org/x/sync/semaphore"
 )
 
@@ -112,7 +114,27 @@ func Map[T any, Result any](
 		resultTracker uint64 = 1
 	)
 
+	var rN int64
+
+	if o.RandomDelayTimeMin != 0 || o.RandomDelayTimeMax != 0 && o.RandomDelayTimeMin < o.RandomDelayTimeMax && o.RandomDelayTimeDuration != 0 {
+		r, err := randomness.New(o.RandomDelayTimeMin, o.RandomDelayTimeMax, 3, false)
+		if err != nil {
+			return nil, []error{err}
+		}
+
+		n, err := r.Generate()
+		if err != nil {
+			return nil, []error{err}
+		}
+
+		rN = n
+	}
+
 	for i := range items {
+		if rN != 0 {
+			time.Sleep(time.Duration(rN) * o.RandomDelayTimeDuration)
+		}
+
 		if o.Limit > 0 {
 			if atomic.LoadUint64(&resultTracker) > uint64(o.Limit) {
 				break

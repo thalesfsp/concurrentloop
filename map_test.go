@@ -140,7 +140,7 @@ func TestNew_ConcurrentProcessing_WithLimit(t *testing.T) {
 	}
 
 	// Call the function concurrently.
-	r1, err1 := Map(context.Background(), sl1, cF1, WithLimit(3))
+	r1, err1 := Map(context.Background(), sl1, cF1, WithLimit(3), WithRandomDelayTime(100, 300, time.Millisecond))
 
 	if err1 != nil {
 		t.Errorf("ConcurrentProcessing() error = %v", err1)

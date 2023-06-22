@@ -1,5 +1,7 @@
 package concurrentloop
 
+import "time"
+
 //////
 // Consts, vars and types.
 //////
@@ -14,6 +16,15 @@ type Option struct {
 
 	// The max amount of results to collect before
 	Limit int
+
+	// RandomDelayTimeDuration is the unit of the duration (Second, Millisecond, etc.)
+	RandomDelayTimeDuration time.Duration
+
+	// RandomDelayTimeMax is the upper limit.
+	RandomDelayTimeMax int
+
+	// RandomDelayTimeMin is the lower limit.
+	RandomDelayTimeMin int
 
 	// RemoveZeroValues indicates whether to remove zero values from the results.
 	RemoveZeroValues bool
@@ -45,6 +56,19 @@ func WithRemoveZeroValues(remove bool) Func {
 func WithLimit(limit int) Func {
 	return func(o Option) Option {
 		o.Limit = limit
+
+		return o
+	}
+}
+
+// WithRandomDelayTime sets the random delay time between each iteration.
+func WithRandomDelayTime(min, max int, d time.Duration) Func {
+	return func(o Option) Option {
+		o.RandomDelayTimeMax = max
+
+		o.RandomDelayTimeMin = min
+
+		o.RandomDelayTimeDuration = d
 
 		return o
 	}
