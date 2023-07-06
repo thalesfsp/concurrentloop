@@ -8,6 +8,9 @@ package concurrentloop
 // Vars, consts, and types.
 //////
 
+// Name of the package.
+const Name = "concurrentloop"
+
 // ResultCh receives the result from the channel.
 type ResultCh[T any] struct {
 	Error  error

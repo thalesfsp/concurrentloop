@@ -21,7 +21,7 @@ import (
 )
 
 // Map logger.
-var mapLogger = sypl.NewDefault("concurrentloop", level.None).New("map")
+var mapLogger = sypl.NewDefault(Name, level.None).New("map")
 
 //////
 // Vars, consts, and types.
@@ -181,8 +181,9 @@ func Map[T any, Result any](
 				defer errMutex.Unlock()
 
 				errs = append(errs, customerror.New(
-					fmt.Sprintf("failed to map %v", items[index]),
+					fmt.Sprintf("failed mapping, on item %v", items[index]),
 					customerror.WithError(err),
+					customerror.WithTag(Name),
 				))
 
 				return
@@ -194,8 +195,9 @@ func Map[T any, Result any](
 				defer errMutex.Unlock()
 
 				errs = append(errs, customerror.New(
-					fmt.Sprintf("failed to map %v", items[index]),
+					fmt.Sprintf("failed mapping, on item %v", items[index]),
 					customerror.WithError(fmt.Errorf("result index %v out of range", index)),
+					customerror.WithTag(Name),
 				))
 
 				return
@@ -291,7 +293,8 @@ func MapM[T any, Result any](
 				defer errMutex.Unlock()
 
 				errs = append(errs, customerror.New(
-					fmt.Sprintf("failed to map %v", k),
+					fmt.Sprintf("failed mapping, key %v", k),
+					customerror.WithTag(Name),
 					customerror.WithError(err),
 				))
 
