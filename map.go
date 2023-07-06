@@ -15,8 +15,13 @@ import (
 
 	"github.com/thalesfsp/customerror"
 	"github.com/thalesfsp/randomness"
+	"github.com/thalesfsp/sypl"
+	"github.com/thalesfsp/sypl/level"
 	"golang.org/x/sync/semaphore"
 )
+
+// Map logger.
+var mapLogger = sypl.NewDefault("concurrentloop", level.None).New("map")
 
 //////
 // Vars, consts, and types.
@@ -116,7 +121,7 @@ func Map[T any, Result any](
 		resultTracker uint64 = 1
 	)
 
-	var rN int64
+	var rdmn *randomness.Randomness
 
 	if o.RandomDelayTimeMin != 0 ||
 		o.RandomDelayTimeMax != 0 &&
@@ -127,17 +132,21 @@ func Map[T any, Result any](
 			return nil, []error{err}
 		}
 
-		n, err := r.Generate()
-		if err != nil {
-			return nil, []error{err}
-		}
-
-		rN = n
+		rdmn = r
 	}
 
-	for i := range items {
-		if rN != 0 {
-			time.Sleep(time.Duration(rN) * o.RandomDelayTimeDuration)
+	for index := range items {
+		if rdmn != nil {
+			n, err := rdmn.Generate()
+			if err != nil {
+				return nil, []error{err}
+			}
+
+			dS := time.Duration(n) * o.RandomDelayTimeDuration
+
+			mapLogger.Tracelnf("go routine %d is waiting for %v", index, dS)
+
+			time.Sleep(dS)
 		}
 
 		if o.Limit > 0 {
@@ -147,30 +156,32 @@ func Map[T any, Result any](
 		}
 
 		if ctx.Err() != nil {
-			errs = append(errs, customerror.New(fmt.Sprintf(`context errored before mapping "%v"`, items[i])))
+			errs = append(errs, customerror.New(fmt.Sprintf(`context errored before mapping "%v"`, items[index])))
 
 			return RemoveZeroValues(o.RemoveZeroValues, results), errs
 		}
 
 		if err := sem.Acquire(ctx, 1); err != nil {
-			errs = append(errs, customerror.New(fmt.Sprintf(`context timeout before mapping "%v"`, items[i])))
+			errs = append(errs, customerror.New(fmt.Sprintf(`context timeout before mapping "%v"`, items[index])))
 
 			return RemoveZeroValues(o.RemoveZeroValues, results), errs
 		}
 
 		wg.Add(1)
 
-		go func(i int) {
+		go func(index int) {
 			defer sem.Release(1)
 			defer wg.Done()
 
-			res, err := f(ctx, items[i])
+			mapLogger.Tracelnf("go routine %d started", index)
+
+			res, err := f(ctx, items[index])
 			if err != nil {
 				errMutex.Lock()
 				defer errMutex.Unlock()
 
 				errs = append(errs, customerror.New(
-					fmt.Sprintf("failed to map %v", items[i]),
+					fmt.Sprintf("failed to map %v", items[index]),
 					customerror.WithError(err),
 				))
 
@@ -178,20 +189,17 @@ func Map[T any, Result any](
 			}
 
 			// Check if result i exists
-			if len(results) <= i {
+			if len(results) <= index {
 				errMutex.Lock()
 				defer errMutex.Unlock()
 
 				errs = append(errs, customerror.New(
-					fmt.Sprintf("failed to map %v", items[i]),
-					customerror.WithError(fmt.Errorf("result index %v out of range", i)),
+					fmt.Sprintf("failed to map %v", items[index]),
+					customerror.WithError(fmt.Errorf("result index %v out of range", index)),
 				))
 
 				return
 			}
-
-			// resMutex.Lock()
-			// defer resMutex.Unlock()
 
 			if o.Limit > 0 {
 				if atomic.LoadUint64(&resultTracker) > uint64(o.Limit) {
@@ -199,10 +207,10 @@ func Map[T any, Result any](
 				}
 			}
 
-			results[i] = res
+			results[index] = res
 
 			atomic.AddUint64(&resultTracker, 1)
-		}(i)
+		}(index)
 	}
 
 	wg.Wait()
