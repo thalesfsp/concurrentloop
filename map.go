@@ -92,7 +92,7 @@ func RemoveZeroValues[T any](removeZeroValues bool, results []T) []T {
 // Note: Because the function executes concurrently, the functions you provide must
 // be safe for concurrent use.
 //
-//nolint:funlen,gomnd,gocognit
+//nolint:funlen,gomnd,gocognit,mnd
 func Map[T any, Result any](
 	ctx context.Context,
 	items []T,

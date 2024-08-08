@@ -26,6 +26,8 @@ linters:
     - ireturn
     - varnamelen
     - interfacebloat
+    - testifylint
+    - depguard
   fast: false
 
 # Settings for specific linters

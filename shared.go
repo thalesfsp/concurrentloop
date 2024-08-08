@@ -28,3 +28,23 @@ func Flatten2D[T any](data [][]T) []T {
 
 	return result
 }
+
+// SplitSlice splits a slice into batches of a given size.
+func SplitSlice[T any](items []T, batchSize int) [][]T {
+	if batchSize <= 0 {
+		return nil
+	}
+
+	if len(items) == 0 {
+		return [][]T{}
+	}
+
+	batches := make([][]T, 0, (len(items)+batchSize-1)/batchSize)
+	for batchSize < len(items) {
+		items, batches = items[batchSize:], append(batches, items[0:batchSize:batchSize])
+	}
+
+	batches = append(batches, items)
+
+	return batches
+}

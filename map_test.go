@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+//nolint:revive
 func TestNew_ConcurrentProcessing(t *testing.T) {
 	sl1 := []int{1, 2, 3, 4, 5}
 	sl2 := []string{"a", "b", "c", "d", "e"}
@@ -110,6 +111,7 @@ func TestNew_ConcurrentProcessing(t *testing.T) {
 	assert.ErrorContains(t, err6, `context timeout before mapping "d"`)
 }
 
+//nolint:revive
 func TestNew_ConcurrentProcessing_WithConcurrency(t *testing.T) {
 	sl1 := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
 
@@ -131,6 +133,7 @@ func TestNew_ConcurrentProcessing_WithConcurrency(t *testing.T) {
 	assert.Equal(t, len(r1), len(sl1))
 }
 
+//nolint:revive
 func TestNew_ConcurrentProcessing_WithLimit(t *testing.T) {
 	sl1 := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
 
@@ -151,6 +154,7 @@ func TestNew_ConcurrentProcessing_WithLimit(t *testing.T) {
 	assert.Equal(t, 3, len(r1))
 }
 
+//nolint:revive
 func TestMapM(t *testing.T) {
 	type TestStruct struct{ A string }
 
@@ -168,6 +172,7 @@ func TestMapM(t *testing.T) {
 	assert.Len(t, got, 3)
 }
 
+//nolint:revive
 func TestMapM_withOptions(t *testing.T) {
 	type TestStruct struct{ A string }
 

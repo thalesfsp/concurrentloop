@@ -52,6 +52,8 @@ func Execute[T any](ctx context.Context, fns []ExecuteFunc[T]) ([]T, Errors) {
 // ExecuteCh calls the `fns` concurrently.
 //
 // NOTE: It's the caller's responsibility to close the channel.
+//
+//nolint:copyloopvar
 func ExecuteCh[T any](ctx context.Context, fns []ExecuteFunc[T]) chan ResultCh[T] {
 	resultsCh := make(chan ResultCh[T])
 
