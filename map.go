@@ -156,13 +156,13 @@ func Map[T any, Result any](
 		}
 
 		if ctx.Err() != nil {
-			errs = append(errs, customerror.New(fmt.Sprintf(`context errored before mapping "%v"`, items[index])))
+			errs = append(errs, customerror.New(fmt.Sprintf(`context errored before mapping "%+v"`, items[index])))
 
 			return RemoveZeroValues(o.RemoveZeroValues, results), errs
 		}
 
 		if err := sem.Acquire(ctx, 1); err != nil {
-			errs = append(errs, customerror.New(fmt.Sprintf(`context timeout before mapping "%v"`, items[index])))
+			errs = append(errs, customerror.New(fmt.Sprintf(`context timeout before mapping "%+v"`, items[index])))
 
 			return RemoveZeroValues(o.RemoveZeroValues, results), errs
 		}
@@ -181,7 +181,7 @@ func Map[T any, Result any](
 				defer errMutex.Unlock()
 
 				errs = append(errs, customerror.New(
-					fmt.Sprintf("failed mapping, on item %v", items[index]),
+					fmt.Sprintf("failed mapping, on item %+v", items[index]),
 					customerror.WithError(err),
 					customerror.WithTag(Name),
 				))
@@ -195,7 +195,7 @@ func Map[T any, Result any](
 				defer errMutex.Unlock()
 
 				errs = append(errs, customerror.New(
-					fmt.Sprintf("failed mapping, on item %v", items[index]),
+					fmt.Sprintf("failed mapping, on item %+v", items[index]),
 					customerror.WithError(fmt.Errorf("result index %v out of range", index)),
 					customerror.WithTag(Name),
 				))
@@ -265,14 +265,14 @@ func MapM[T any, Result any](
 
 		// Context error handling.
 		if ctx.Err() != nil {
-			errs = append(errs, customerror.New(fmt.Sprintf(`context errored before mapping "%v"`, key)))
+			errs = append(errs, customerror.New(fmt.Sprintf(`context errored before mapping "%+v"`, key)))
 
 			return RemoveZeroValues(o.RemoveZeroValues, results), errs
 		}
 
 		// Semaphore handling.
 		if err := sem.Acquire(ctx, 1); err != nil {
-			errs = append(errs, customerror.New(fmt.Sprintf(`context timeout before mapping "%v"`, key)))
+			errs = append(errs, customerror.New(fmt.Sprintf(`context timeout before mapping "%+v"`, key)))
 
 			return RemoveZeroValues(o.RemoveZeroValues, results), errs
 		}
@@ -293,7 +293,7 @@ func MapM[T any, Result any](
 				defer errMutex.Unlock()
 
 				errs = append(errs, customerror.New(
-					fmt.Sprintf("failed mapping, key %v", k),
+					fmt.Sprintf("failed mapping, key %+v", k),
 					customerror.WithTag(Name),
 					customerror.WithError(err),
 				))
