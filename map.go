@@ -527,9 +527,12 @@ func MapDone[T any, Result any](
 
 	// Initialize error handling
 	var (
-		errs          []error        // Slice to store errors
-		errMutex      sync.Mutex     // Mutex to protect error slice access
-		resultTracker uint64     = 1 // Atomic counter for tracking processed results
+		errs     []error    // Slice to store errors
+		errMutex sync.Mutex // Mutex to protect error slice access
+
+		resMutex sync.Mutex
+
+		resultTracker uint64 = 1 // Atomic counter for tracking processed results
 	)
 
 	// Initialize randomness generator for delay if configured
@@ -554,9 +557,15 @@ func MapDone[T any, Result any](
 	for index := range items {
 		select {
 		case <-done: // Check if processing should terminate early
+			resMutex.Lock()
+			defer resMutex.Unlock()
+
 			return RemoveZeroValues(o.RemoveZeroValues, results), errs
 		case <-ctx.Done(): // Check if context has been cancelled
 			errs = append(errs, customerror.New(fmt.Sprintf(`context errored before mapping "%+v"`, items[index])))
+
+			resMutex.Lock()
+			defer resMutex.Unlock()
 
 			return RemoveZeroValues(o.RemoveZeroValues, results), errs
 		default:
@@ -584,6 +593,9 @@ func MapDone[T any, Result any](
 			// Acquire semaphore slot (blocks if at capacity)
 			if err := sem.Acquire(ctx, 1); err != nil {
 				errs = append(errs, customerror.New(fmt.Sprintf(`context timeout before mapping "%+v"`, items[index])))
+
+				resMutex.Lock()
+				defer resMutex.Unlock()
 
 				return RemoveZeroValues(o.RemoveZeroValues, results), errs
 			}
@@ -632,7 +644,9 @@ func MapDone[T any, Result any](
 				}
 
 				// Store result and increment counter
+				resMutex.Lock()
 				results[index] = res
+				resMutex.Unlock()
 
 				atomic.AddUint64(&resultTracker, 1)
 			}(index)
@@ -644,8 +658,14 @@ func MapDone[T any, Result any](
 
 	// Return results and any errors
 	if len(errs) > 0 {
+		resMutex.Lock()
+		defer resMutex.Unlock()
+
 		return RemoveZeroValues(o.RemoveZeroValues, results), errs
 	}
+
+	resMutex.Lock()
+	defer resMutex.Unlock()
 
 	return RemoveZeroValues(o.RemoveZeroValues, results), nil
 }
