@@ -62,11 +62,11 @@ func WithLimit(limit int) Func {
 }
 
 // WithRandomDelayTime sets the random delay time between each iteration.
-func WithRandomDelayTime(min, max int, d time.Duration) Func {
+func WithRandomDelayTime(minDelay, maxDelay int, d time.Duration) Func {
 	return func(o Option) Option {
-		o.RandomDelayTimeMax = max
+		o.RandomDelayTimeMax = maxDelay
 
-		o.RandomDelayTimeMin = min
+		o.RandomDelayTimeMin = minDelay
 
 		o.RandomDelayTimeDuration = d
 
