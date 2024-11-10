@@ -28,6 +28,7 @@ linters:
     - interfacebloat
     - testifylint
     - depguard
+    - exhaustive
   fast: false
 
 # Settings for specific linters

@@ -45,21 +45,41 @@ type MapFuncCh[T any, Result any] func(ctx context.Context, item T, done chan<- 
 
 // isZeroOfUnderlyingType checks if the value is the zero value.
 func isZeroOfUnderlyingType(x interface{}) bool {
-	return reflect.DeepEqual(x, reflect.Zero(reflect.TypeOf(x)).Interface())
+	if x == nil {
+		return true
+	}
+
+	v := reflect.ValueOf(x)
+
+	// Handle special cases.
+	switch v.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+		if v.IsNil() {
+			return true
+		}
+	}
+
+	// Get the zero value for comparison.
+	zero := reflect.Zero(v.Type()).Interface()
+
+	return reflect.DeepEqual(x, zero)
 }
 
 // RemoveZeroValues removes zero values from the results.
 func RemoveZeroValues[T any](removeZeroValues bool, results []T) []T {
-	if removeZeroValues {
-		for i := 0; i < len(results); i++ {
-			if isZeroOfUnderlyingType(results[i]) {
-				results = append(results[:i], results[i+1:]...)
-				i--
-			}
+	if !removeZeroValues || results == nil {
+		return results
+	}
+
+	filtered := make([]T, 0, len(results))
+
+	for _, item := range results {
+		if !isZeroOfUnderlyingType(item) {
+			filtered = append(filtered, item)
 		}
 	}
 
-	return results
+	return filtered
 }
 
 // Map concurrently applies a function `f` to each element in the slice `items`
@@ -160,6 +180,7 @@ func Map[T any, Result any](
 
 			errs = append(errs, customerror.New(fmt.Sprintf(`context errored before mapping "%+v"`, items[index])))
 
+			// When returning results, use the fixed RemoveZeroValues
 			return RemoveZeroValues(o.RemoveZeroValues, results), errs
 		}
 
