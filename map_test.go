@@ -661,3 +661,102 @@ func TestMapCh_WithOnlyEndChannel(t *testing.T) {
 	}
 	assert.Len(t, endResults, 3)
 }
+
+// TestBreakStatementBehavior demonstrates why labeled breaks are necessary
+// when using break inside select statements within for loops
+func TestBreakStatementBehavior(t *testing.T) {
+	t.Run("unlabeled_break_only_exits_select", func(t *testing.T) {
+		processedItems := []string{}
+		items := []string{"a", "b", "c", "d", "e"}
+		cancelCtx, cancel := context.WithCancel(context.Background())
+
+		// Cancel immediately to trigger the break
+		cancel()
+
+		// Simulate the OLD behavior (without labeled break)
+		for _, item := range items {
+			select {
+			case <-cancelCtx.Done():
+				// This break only exits the select, NOT the for loop!
+				break
+			default:
+				// This won't execute due to canceled context
+			}
+
+			// ❌ This code STILL EXECUTES even after break!
+			// This is the problematic behavior we fixed
+			processedItems = append(processedItems, "processed-"+item)
+		}
+
+		// With unlabeled break, ALL items get processed despite context cancellation
+		assert.Len(t, processedItems, 5, "Unlabeled break allows loop to continue processing all items")
+		assert.Equal(t, []string{
+			"processed-a", "processed-b", "processed-c", "processed-d", "processed-e",
+		}, processedItems)
+	})
+
+	t.Run("labeled_break_exits_entire_loop", func(t *testing.T) {
+		processedItems := []string{}
+		items := []string{"a", "b", "c", "d", "e"}
+		cancelCtx, cancel := context.WithCancel(context.Background())
+
+		// Cancel immediately to trigger the break
+		cancel()
+
+		// Simulate the NEW behavior (with labeled break)
+	itemLoop:
+		for _, item := range items {
+			select {
+			case <-cancelCtx.Done():
+				// This break exits the ENTIRE for loop!
+				break itemLoop
+			default:
+				// This won't execute due to canceled context
+			}
+
+			// ✅ This code is NEVER reached when context is canceled
+			processedItems = append(processedItems, "processed-"+item)
+		}
+
+		// With labeled break, NO items get processed after context cancellation
+		assert.Len(t, processedItems, 0, "Labeled break immediately exits the entire loop")
+		assert.Equal(t, []string{}, processedItems)
+	})
+
+	t.Run("real_world_example_with_context_timeout", func(t *testing.T) {
+		items := []string{"item1", "item2", "item3", "item4", "item5"}
+		processedCount := 0
+
+		// Create context that times out after 50ms
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		defer cancel()
+
+		startTime := time.Now()
+
+	processingLoop:
+		for i, item := range items {
+			select {
+			case <-ctx.Done():
+				t.Logf("Context canceled after processing %d items in %v", processedCount, time.Since(startTime))
+				// Labeled break ensures we immediately stop processing
+				break processingLoop
+			default:
+				// Proceed with processing
+			}
+
+			// Simulate some processing time
+			time.Sleep(20 * time.Millisecond)
+
+			processedCount++
+			t.Logf("Processed item %d: %s", i+1, item)
+		}
+
+		elapsed := time.Since(startTime)
+
+		// We should have processed fewer than all items due to timeout
+		assert.Less(t, processedCount, len(items), "Should process fewer items due to context timeout")
+		assert.Less(t, elapsed, 100*time.Millisecond, "Should exit quickly after context timeout")
+
+		t.Logf("Final stats: processed %d/%d items in %v", processedCount, len(items), elapsed)
+	})
+}
