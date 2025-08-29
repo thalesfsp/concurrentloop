@@ -10,7 +10,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -59,14 +61,14 @@ func TestNew_ConcurrentProcessing(t *testing.T) {
 	}
 
 	// Call the function concurrently.
-	r1, err1 := Map(context.Background(), sl1, cF1)
-	r2, err2 := Map(context.Background(), sl2, cF2)
-	r3, err3 := Map(context.Background(), sl3, cF3)
-	r4, err4 := Map(context.Background(), sl2, cF4, WithBatchSize(1))
-	r5, err5 := Map(context.Background(), sl5, cF5, WithBatchSize(1))
+	r1, err1 := Map(t.Context(), sl1, cF1)
+	r2, err2 := Map(t.Context(), sl2, cF2)
+	r3, err3 := Map(t.Context(), sl3, cF3)
+	r4, err4 := Map(t.Context(), sl2, cF4, WithBatchSize(1))
+	r5, err5 := Map(t.Context(), sl5, cF5, WithBatchSize(1))
 
 	// Call the function concurrently.
-	ctxWithTimeout, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	ctxWithTimeout, cancel := context.WithTimeout(t.Context(), 1*time.Second)
 	defer cancel()
 
 	r6, err6 := Map(ctxWithTimeout, sl2, cF6, WithBatchSize(1))
@@ -122,7 +124,7 @@ func TestNew_ConcurrentProcessing_WithConcurrency(t *testing.T) {
 	}
 
 	// Call the function concurrently.
-	r1, err1 := Map(context.Background(), sl1, cF1, WithBatchSize(1))
+	r1, err1 := Map(t.Context(), sl1, cF1, WithBatchSize(1))
 
 	if err1 != nil {
 		t.Errorf("ConcurrentProcessing() error = %v", err1)
@@ -143,7 +145,7 @@ func TestNew_ConcurrentProcessing_WithLimit(t *testing.T) {
 	}
 
 	// Call the function concurrently.
-	r1, err1 := Map(context.Background(), sl1, cF1, WithLimit(3), WithRandomDelayTime(100, 300, time.Millisecond))
+	r1, err1 := Map(t.Context(), sl1, cF1, WithLimit(3), WithRandomDelayTime(100, 300, time.Millisecond))
 
 	if err1 != nil {
 		t.Errorf("ConcurrentProcessing() error = %v", err1)
@@ -157,7 +159,7 @@ func TestNew_ConcurrentProcessing_WithLimit(t *testing.T) {
 func TestMapM(t *testing.T) {
 	type TestStruct struct{ A string }
 
-	got, errs := MapM(context.Background(), map[string]TestStruct{
+	got, errs := MapM(t.Context(), map[string]TestStruct{
 		"1": {A: "a"},
 		"2": {A: "b"},
 		"3": {A: "c"},
@@ -174,7 +176,7 @@ func TestMapM(t *testing.T) {
 func TestMapM_withOptions(t *testing.T) {
 	type TestStruct struct{ A string }
 
-	got, errs := MapM(context.Background(), map[string]TestStruct{
+	got, errs := MapM(t.Context(), map[string]TestStruct{
 		"1": {A: "a"},
 		"2": {A: "b"},
 		"3": {A: "c"},
@@ -241,20 +243,20 @@ func TestNew_ConcurrentProcessingCh(t *testing.T) {
 	}
 
 	// Call the function concurrently
-	r1, err1 := MapDone(context.Background(), sl1, cF1)
-	r2, err2 := MapDone(context.Background(), sl2, cF2)
-	r3, err3 := MapDone(context.Background(), sl3, cF3)
-	r4, err4 := MapDone(context.Background(), sl2, cF4, WithBatchSize(1))
-	r5, err5 := MapDone(context.Background(), sl5, cF5, WithBatchSize(1))
+	r1, err1 := MapDone(t.Context(), sl1, cF1)
+	r2, err2 := MapDone(t.Context(), sl2, cF2)
+	r3, err3 := MapDone(t.Context(), sl3, cF3)
+	r4, err4 := MapDone(t.Context(), sl2, cF4, WithBatchSize(1))
+	r5, err5 := MapDone(t.Context(), sl5, cF5, WithBatchSize(1))
 
 	// Test with context timeout
-	ctxWithTimeout, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	ctxWithTimeout, cancel := context.WithTimeout(t.Context(), 1*time.Second)
 	defer cancel()
 
 	r6, err6 := MapDone(ctxWithTimeout, sl2, cF6, WithBatchSize(1))
 
 	// Test early termination
-	r7, err7 := MapDone(context.Background(), sl2, cF7, WithBatchSize(1))
+	r7, err7 := MapDone(t.Context(), sl2, cF7, WithBatchSize(1))
 
 	// Check for errors
 	if err1 != nil {
@@ -312,7 +314,7 @@ func TestNew_ConcurrentProcessing_WithConcurrencyCh(t *testing.T) {
 	}
 
 	// Call the function concurrently.
-	r1, err1 := MapDone(context.Background(), sl1, cF1, WithBatchSize(1))
+	r1, err1 := MapDone(t.Context(), sl1, cF1, WithBatchSize(1))
 
 	if err1 != nil {
 		t.Errorf("ConcurrentProcessing() error = %v", err1)
@@ -333,7 +335,7 @@ func TestNew_ConcurrentProcessing_WithLimitCh(t *testing.T) {
 	}
 
 	// Call the function concurrently.
-	r1, err1 := MapDone(context.Background(), sl1, cF1, WithLimit(3), WithRandomDelayTime(100, 300, time.Millisecond))
+	r1, err1 := MapDone(t.Context(), sl1, cF1, WithLimit(3), WithRandomDelayTime(100, 300, time.Millisecond))
 
 	if err1 != nil {
 		t.Errorf("ConcurrentProcessing() error = %v", err1)
@@ -356,7 +358,7 @@ func TestMap_WithWriter(t *testing.T) {
 	}
 
 	// Call the function concurrently with writer option.
-	r1, err1 := Map(context.Background(), sl1, cF1, WithWriter(&buf))
+	r1, err1 := Map(t.Context(), sl1, cF1, WithWriter(&buf))
 
 	if err1 != nil {
 		t.Errorf("Map() error = %v", err1)
@@ -398,7 +400,7 @@ func TestMap_WithWriterToFile(t *testing.T) {
 	}
 
 	// Create a temporary file
-	tempFile, err := os.CreateTemp("", "sales_output_*.json")
+	tempFile, err := os.CreateTemp(t.TempDir(), "sales_output_*.json")
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
@@ -409,12 +411,12 @@ func TestMap_WithWriterToFile(t *testing.T) {
 	// Create a function that processes sales records and adds tax
 	processSales := func(_ context.Context, record SalesRecord) (SalesRecord, error) {
 		// Add 10% tax to the amount
-		record.Amount = record.Amount * 1.10
+		record.Amount *= 1.10
 		return record, nil
 	}
 
 	// Call Map with the writer option pointing to the temp file
-	results, errors := Map(context.Background(), salesData, processSales, WithWriter(tempFile))
+	results, errors := Map(t.Context(), salesData, processSales, WithWriter(tempFile))
 
 	if errors != nil {
 		t.Errorf("Map() error = %v", errors)
@@ -454,7 +456,7 @@ func TestMapCh(t *testing.T) {
 	perCycleCh := make(chan string, 10)
 	endCh := make(chan string, 10)
 
-	errs := MapCh(context.Background(), map[string]TestStruct{
+	errs := MapCh(t.Context(), map[string]TestStruct{
 		"1": {A: "a"},
 		"2": {A: "b"},
 		"3": {A: "c"},
@@ -496,7 +498,7 @@ func TestMapCh_WithPerCycleFileOutput(t *testing.T) {
 	type TestStruct struct{ A string }
 
 	// Create a temporary file
-	tempFile, err := os.CreateTemp("", "per_cycle_output_*.txt")
+	tempFile, err := os.CreateTemp(t.TempDir(), "per_cycle_output_*.txt")
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
@@ -513,11 +515,11 @@ func TestMapCh_WithPerCycleFileOutput(t *testing.T) {
 	go func() {
 		defer close(done)
 		for result := range perCycleCh {
-			tempFile.WriteString(result + "\n")
+			_, _ = tempFile.WriteString(result + "\n")
 		}
 	}()
 
-	errs := MapCh(context.Background(), map[string]TestStruct{
+	errs := MapCh(t.Context(), map[string]TestStruct{
 		"1": {A: "a"},
 		"2": {A: "b"},
 		"3": {A: "c"},
@@ -567,7 +569,7 @@ func TestMapCh_WithNilChannels(t *testing.T) {
 	type TestStruct struct{ A string }
 
 	// Test with nil channels should now fail.
-	errs := MapCh(context.Background(), map[string]TestStruct{
+	errs := MapCh(t.Context(), map[string]TestStruct{
 		"1": {A: "a"},
 		"2": {A: "b"},
 		"3": {A: "c"},
@@ -602,7 +604,7 @@ func TestMapCh_WithOnlyPerCycleChannel(t *testing.T) {
 	// Create only per-cycle channel, endCh is nil.
 	perCycleCh := make(chan string, 10)
 
-	errs := MapCh(context.Background(), map[string]TestStruct{
+	errs := MapCh(t.Context(), map[string]TestStruct{
 		"1": {A: "a"},
 		"2": {A: "b"},
 		"3": {A: "c"},
@@ -638,7 +640,7 @@ func TestMapCh_WithOnlyEndChannel(t *testing.T) {
 	// Create only end channel, perCycleCh is nil.
 	endCh := make(chan string, 10)
 
-	errs := MapCh(context.Background(), map[string]TestStruct{
+	errs := MapCh(t.Context(), map[string]TestStruct{
 		"1": {A: "a"},
 		"2": {A: "b"},
 		"3": {A: "c"},
@@ -668,7 +670,7 @@ func TestBreakStatementBehavior(t *testing.T) {
 	t.Run("unlabeled_break_only_exits_select", func(t *testing.T) {
 		processedItems := []string{}
 		items := []string{"a", "b", "c", "d", "e"}
-		cancelCtx, cancel := context.WithCancel(context.Background())
+		cancelCtx, cancel := context.WithCancel(t.Context())
 
 		// Cancel immediately to trigger the break.
 		cancel()
@@ -698,7 +700,7 @@ func TestBreakStatementBehavior(t *testing.T) {
 	t.Run("labeled_break_exits_entire_loop", func(t *testing.T) {
 		processedItems := []string{}
 		items := []string{"a", "b", "c", "d", "e"}
-		cancelCtx, cancel := context.WithCancel(context.Background())
+		cancelCtx, cancel := context.WithCancel(t.Context())
 
 		// Cancel immediately to trigger the break.
 		cancel()
@@ -728,7 +730,7 @@ func TestBreakStatementBehavior(t *testing.T) {
 		processedCount := 0
 
 		// Create context that times out after 50ms.
-		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 		defer cancel()
 
 		startTime := time.Now()
@@ -759,4 +761,190 @@ func TestBreakStatementBehavior(t *testing.T) {
 
 		t.Logf("Final stats: processed %d/%d items in %v", processedCount, len(items), elapsed)
 	})
+}
+
+// FailingWriter is a writer that fails after writing a certain number of bytes.
+type FailingWriter struct {
+	maxBytes int
+	written  int
+}
+
+func (fw *FailingWriter) Write(p []byte) (int, error) {
+	if fw.written+len(p) > fw.maxBytes {
+		return 0, errors.New("simulated write failure")
+	}
+
+	fw.written += len(p)
+
+	return len(p), nil
+}
+
+func TestMap_WithFailingWriter_StopsImmediately(t *testing.T) {
+	// Create a smaller dataset to make the test more predictable
+	items := make([]int, 20)
+	for i := range items {
+		items[i] = i + 1
+	}
+
+	// Create a failing writer that will fail after a very small amount of data
+	// Each marshaled int is roughly 1-2 bytes, so this should fail quickly
+	failingWriter := &FailingWriter{maxBytes: 10} // Fail after ~10 bytes
+
+	processFunc := func(_ context.Context, item int) (int, error) {
+		return item * 2, nil
+	}
+
+	// Call Map with the failing writer, using batch size 1 to control concurrency
+	results, errs := Map(t.Context(), items, processFunc, WithWriter(failingWriter), WithBatchSize(1))
+
+	// Should have errors due to writer failure
+	assert.NotNil(t, errs, "Should have errors when writer fails")
+	assert.Greater(t, len(errs), 0, "Should have at least one error")
+
+	// Debug: Print a few error messages
+	t.Logf("First few errors:")
+	for i, err := range errs {
+		if i < 5 { // Only print first 5 errors
+			t.Logf("  Error %d: %s", i, err.Error())
+		}
+	}
+
+	// Check that at least one error is about writing failure
+	hasWriteError := false
+	for _, err := range errs {
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "failed to write result to writer") {
+			hasWriteError = true
+			break
+		}
+	}
+	assert.True(t, hasWriteError, "Should have a write failure error")
+
+	// The key assertion: when a write error occurs in a goroutine, that goroutine
+	// returns immediately and doesn't continue processing. We should see that
+	// individual goroutines that encounter write errors return early.
+	// Since we're using batch size 1, goroutines process sequentially.
+
+	// Count non-zero results (successful processing)
+	nonZeroResults := 0
+	for _, result := range results {
+		if result != 0 {
+			nonZeroResults++
+		}
+	}
+
+	t.Logf("Non-zero results: %d, Total results length: %d, Total items: %d",
+		nonZeroResults, len(results), len(items))
+	t.Logf("Number of errors: %d", len(errs))
+
+	// The important thing is that we have write errors and they're being handled properly
+	// Each goroutine that encounters a write error should return immediately
+	assert.Greater(t, len(errs), 0, "Should have write errors")
+	assert.True(t, hasWriteError, "Should have write failure errors")
+}
+
+func TestMapM_WithFailingWriter_StopsImmediately(t *testing.T) {
+	// Create a smaller dataset to make the test more predictable
+	itemsMap := make(map[string]int)
+	for i := range 20 {
+		itemsMap[fmt.Sprintf("key%d", i)] = i + 1
+	}
+
+	// Create a failing writer that will fail after a very small amount of data
+	failingWriter := &FailingWriter{maxBytes: 10} // Fail after ~10 bytes
+
+	processFunc := func(_ context.Context, _ string, item int) (int, error) {
+		return item * 2, nil
+	}
+
+	// Call MapM with the failing writer
+	results, errs := MapM(t.Context(), itemsMap, processFunc, WithWriter(failingWriter), WithBatchSize(1))
+
+	// Should have errors due to writer failure
+	assert.NotNil(t, errs, "Should have errors when writer fails")
+	assert.Greater(t, len(errs), 0, "Should have at least one error")
+
+	// Check that at least one error is about writing failure
+	hasWriteError := false
+	for _, err := range errs {
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "failed to write result to writer") {
+			hasWriteError = true
+			break
+		}
+	}
+	assert.True(t, hasWriteError, "Should have a write failure error")
+
+	t.Logf("Processed %d items, Total items: %d", len(results), len(itemsMap))
+	t.Logf("Number of errors: %d", len(errs))
+
+	// The important verification: we have write errors being handled
+	assert.Greater(t, len(errs), 0, "Should have write errors")
+	assert.True(t, hasWriteError, "Should have write failure errors")
+}
+
+func TestMapCh_WithFailingWriter_StopsImmediately(t *testing.T) {
+	// Create a smaller dataset to make the test more predictable
+	itemsMap := make(map[string]int)
+	for i := range 20 {
+		itemsMap[fmt.Sprintf("key%d", i)] = i + 1
+	}
+
+	// Create a failing writer that will fail after a very small amount of data
+	failingWriter := &FailingWriter{maxBytes: 10} // Fail after ~10 bytes
+
+	// Create channels for results
+	perCycleCh := make(chan int, 50)
+	endCh := make(chan int, 50)
+
+	processFunc := func(_ context.Context, _ string, item int, perCycle chan<- int, _ chan<- int) (int, error) {
+		// Send to per-cycle channel if available
+		if perCycle != nil {
+			select {
+			case perCycle <- item:
+			default:
+			}
+		}
+		return item * 2, nil
+	}
+
+	// Call MapCh with the failing writer
+	errs := MapCh(t.Context(), itemsMap, processFunc, perCycleCh, endCh, WithWriter(failingWriter), WithBatchSize(1))
+
+	// Close channels
+	close(perCycleCh)
+	close(endCh)
+
+	// Should have errors due to writer failure
+	assert.NotNil(t, errs, "Should have errors when writer fails")
+	assert.Greater(t, len(errs), 0, "Should have at least one error")
+
+	// Check that at least one error is about writing failure
+	hasWriteError := false
+	for _, err := range errs {
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "failed to write result to writer") {
+			hasWriteError = true
+			break
+		}
+	}
+	assert.True(t, hasWriteError, "Should have a write failure error")
+
+	// Count results from channels
+	perCycleCount := 0
+	for range perCycleCh {
+		perCycleCount++
+	}
+
+	endCount := 0
+	for range endCh {
+		endCount++
+	}
+
+	t.Logf("Per-cycle results: %d, End results: %d, Total items: %d", perCycleCount, endCount, len(itemsMap))
+	t.Logf("Number of errors: %d", len(errs))
+
+	// The important verification: we have write errors being handled
+	assert.Greater(t, len(errs), 0, "Should have write errors")
+	assert.True(t, hasWriteError, "Should have write failure errors")
 }

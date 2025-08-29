@@ -46,7 +46,13 @@ type MapFuncCh[T any, Result any] func(ctx context.Context, item T, done chan<- 
 
 // MapMFuncCh is the type of the function that will be executed concurrently for each
 // element in a map with per-cycle and end channels for real-time result streaming.
-type MapMFuncCh[T any, Result any] func(ctx context.Context, key string, item T, perCycleCh chan<- Result, endCh chan<- Result) (Result, error)
+type MapMFuncCh[T any, Result any] func(
+	ctx context.Context,
+	key string,
+	item T,
+	perCycleCh chan<- Result,
+	endCh chan<- Result,
+) (Result, error)
 
 //////
 // Exported functionalities.
@@ -94,7 +100,7 @@ func RemoveZeroValues[T any](removeZeroValues bool, results []T) []T {
 // Map processes each element in a slice concurrently using the provided function.
 // Returns a slice of results and any errors that occurred during processing.
 //
-//nolint:funlen,gomnd,gocognit,mnd,gosec,wsl
+//nolint:funlen,gomnd,gocognit,mnd
 func Map[T any, Result any](
 	ctx context.Context,
 	items []T,
@@ -264,7 +270,20 @@ indexLoop:
 			// Write to writer if specified.
 			if o.Writer != nil {
 				if resBytes, err := json.Marshal(res); err == nil {
-					o.Writer.Write(append(resBytes, '\n'))
+					if _, writeErr := o.Writer.Write(append(resBytes, '\n')); writeErr != nil {
+						errMutex.Lock()
+
+						errs = append(errs, customerror.New(
+							"failed to write result to writer",
+							customerror.WithError(writeErr),
+							customerror.WithTag(Name),
+						))
+
+						errMutex.Unlock()
+						resMutex.Unlock()
+
+						return
+					}
 				}
 			}
 
@@ -293,7 +312,7 @@ indexLoop:
 // MapM processes each key-value pair in a map concurrently using the provided function.
 // Returns a slice of results and any errors that occurred during processing.
 //
-//nolint:funlen,gomnd,gocognit,mnd,gosec,wsl
+//nolint:funlen,gomnd,gocognit,mnd
 func MapM[T any, Result any](
 	ctx context.Context,
 	itemsMap map[string]T,
@@ -448,7 +467,20 @@ keyLoop:
 			// Write to writer if specified.
 			if o.Writer != nil {
 				if resBytes, err := json.Marshal(res); err == nil {
-					o.Writer.Write(append(resBytes, '\n'))
+					if _, writeErr := o.Writer.Write(append(resBytes, '\n')); writeErr != nil {
+						errMutex.Lock()
+
+						errs = append(errs, customerror.New(
+							"failed to write result to writer",
+							customerror.WithError(writeErr),
+							customerror.WithTag(Name),
+						))
+
+						errMutex.Unlock()
+						resMutex.Unlock()
+
+						return
+					}
 				}
 			}
 
@@ -464,7 +496,15 @@ keyLoop:
 	if o.Writer != nil {
 		finalResults := RemoveZeroValues(o.RemoveZeroValues, results)
 		if resultsBytes, err := json.Marshal(finalResults); err == nil {
-			o.Writer.Write(resultsBytes)
+			if _, writeErr := o.Writer.Write(resultsBytes); writeErr != nil {
+				errMutex.Lock()
+				errs = append(errs, customerror.New(
+					"failed to write final results to writer",
+					customerror.WithError(writeErr),
+					customerror.WithTag(Name),
+				))
+				errMutex.Unlock()
+			}
 		}
 	}
 
@@ -486,7 +526,7 @@ keyLoop:
 // The processing function receives a done channel that can be used to signal early termination.
 // Returns a slice of results and any errors that occurred during processing.
 //
-//nolint:funlen,gomnd,gocognit,mnd,gosec
+//nolint:gomnd,gocognit,mnd
 func MapDone[T any, Result any](
 	ctx context.Context,
 	items []T,
@@ -672,7 +712,7 @@ func MapDone[T any, Result any](
 // Per-cycle results are sent to perCycleCh, final results (after RemoveZeroValues) are sent to endCh.
 // Returns only errors that occurred during processing.
 //
-//nolint:funlen,gomnd,gocognit,mnd,gosec,wsl
+//nolint:funlen,gomnd,gocognit,mnd,gocyclo,maintidx
 func MapCh[T any, Result any](
 	ctx context.Context,
 	itemsMap map[string]T,
@@ -840,7 +880,20 @@ itemLoop:
 			// Write to writer if specified.
 			if o.Writer != nil {
 				if resBytes, err := json.Marshal(res); err == nil {
-					o.Writer.Write(append(resBytes, '\n'))
+					if _, writeErr := o.Writer.Write(append(resBytes, '\n')); writeErr != nil {
+						errMutex.Lock()
+
+						errs = append(errs, customerror.New(
+							"failed to write result to writer",
+							customerror.WithError(writeErr),
+							customerror.WithTag(Name),
+						))
+
+						errMutex.Unlock()
+						resMutex.Unlock()
+
+						return
+					}
 				}
 			}
 
