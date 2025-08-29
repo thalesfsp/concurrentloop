@@ -6,6 +6,7 @@ package concurrentloop
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -27,6 +28,8 @@ var mapLogger = sypl.NewDefault(Name, level.None).New("map")
 //////
 // Vars, consts, and types.
 //////
+// Vars, consts, and types.
+//////
 
 // MapFunc is the type of the function that will be executed concurrently for each
 // element in a slice of type `T`. The function takes a `context.Context` and a
@@ -37,7 +40,13 @@ type MapFunc[T any, Result any] func(ctx context.Context, item T) (Result, error
 // each element in the map.
 type MapMFunc[T any, Result any] func(ctx context.Context, key string, item T) (Result, error)
 
+// MapFuncCh is the type of the function that will be executed concurrently for each
+// element in a slice with a done channel for early termination.
 type MapFuncCh[T any, Result any] func(ctx context.Context, item T, done chan<- struct{}) (Result, error)
+
+// MapMFuncCh is the type of the function that will be executed concurrently for each
+// element in a map with per-cycle and end channels for real-time result streaming.
+type MapMFuncCh[T any, Result any] func(ctx context.Context, key string, item T, perCycleCh chan<- Result, endCh chan<- Result) (Result, error)
 
 //////
 // Exported functionalities.
@@ -82,9 +91,8 @@ func RemoveZeroValues[T any](removeZeroValues bool, results []T) []T {
 	return filtered
 }
 
-// Map concurrently applies a function `f` to each element in the slice `items`
-// and returns the resulting slice and any errors that occurred. `f` should be of
-// type MapFunc.
+// Map processes each element in a slice concurrently using the provided function.
+// Returns a slice of results and any errors that occurred during processing.
 //
 //nolint:funlen,gomnd,gocognit,mnd,gosec,wsl
 func Map[T any, Result any](
@@ -143,11 +151,12 @@ func Map[T any, Result any](
 		rdmn = r
 	}
 
+indexLoop:
 	for index := range items {
 		select {
 		case <-ctx.Done():
 			// Context canceled, stop launching new goroutines
-			break
+			break indexLoop
 		default:
 			// Proceed with launching goroutine
 		}
@@ -169,7 +178,7 @@ func Map[T any, Result any](
 		// Limit handling.
 		if o.Limit > 0 {
 			if atomic.LoadUint64(&resultTracker) > uint64(o.Limit) {
-				break
+				break indexLoop
 			}
 		}
 
@@ -251,6 +260,14 @@ func Map[T any, Result any](
 
 			resMutex.Lock()
 			results[index] = res
+
+			// Write to writer if specified
+			if o.Writer != nil {
+				if resBytes, err := json.Marshal(res); err == nil {
+					o.Writer.Write(append(resBytes, '\n'))
+				}
+			}
+
 			resMutex.Unlock()
 
 			atomic.AddUint64(&resultTracker, 1)
@@ -273,9 +290,8 @@ func Map[T any, Result any](
 	return RemoveZeroValues(o.RemoveZeroValues, results), nil
 }
 
-// MapM concurrently applies a function `f` to each element in the map `itemMaps`
-// and returns the resulting slice and any errors that occurred. `f` should be
-// of type MapMFunc.
+// MapM processes each key-value pair in a map concurrently using the provided function.
+// Returns a slice of results and any errors that occurred during processing.
 //
 //nolint:funlen,gomnd,gocognit,mnd,gosec,wsl
 func MapM[T any, Result any](
@@ -334,11 +350,12 @@ func MapM[T any, Result any](
 		rdmn = r
 	}
 
+keyLoop:
 	for key, item := range itemsMap {
 		select {
 		case <-ctx.Done():
 			// Context canceled, stop launching new goroutines
-			break
+			break keyLoop
 		default:
 			// Proceed with launching goroutine
 		}
@@ -360,7 +377,7 @@ func MapM[T any, Result any](
 		// Limit handling.
 		if o.Limit > 0 {
 			if atomic.LoadUint64(&resultTracker) > uint64(o.Limit) {
-				break
+				break keyLoop
 			}
 		}
 
@@ -371,7 +388,7 @@ func MapM[T any, Result any](
 
 			errs = append(errs, customerror.New(fmt.Sprintf(`context errored before mapping "%+v"`, key)))
 
-			break
+			break keyLoop
 		}
 
 		// Semaphore handling.
@@ -381,7 +398,7 @@ func MapM[T any, Result any](
 
 			errs = append(errs, customerror.New(fmt.Sprintf(`context timeout before mapping "%+v"`, key)))
 
-			break
+			break keyLoop
 		}
 
 		//////
@@ -427,6 +444,14 @@ func MapM[T any, Result any](
 
 			resMutex.Lock()
 			results = append(results, res)
+
+			// Write to writer if specified
+			if o.Writer != nil {
+				if resBytes, err := json.Marshal(res); err == nil {
+					o.Writer.Write(append(resBytes, '\n'))
+				}
+			}
+
 			resMutex.Unlock()
 
 			atomic.AddUint64(&resultTracker, 1)
@@ -434,6 +459,14 @@ func MapM[T any, Result any](
 	}
 
 	wg.Wait()
+
+	// Write to writer as JSON array if specified
+	if o.Writer != nil {
+		finalResults := RemoveZeroValues(o.RemoveZeroValues, results)
+		if resultsBytes, err := json.Marshal(finalResults); err == nil {
+			o.Writer.Write(resultsBytes)
+		}
+	}
 
 	// Check if context was canceled and prioritize its error
 	if ctx.Err() != nil {
@@ -449,66 +482,9 @@ func MapM[T any, Result any](
 	return RemoveZeroValues(o.RemoveZeroValues, results), nil
 }
 
-// MapDone concurrently applies a function `f` to each element in the slice `items`
-// and returns the resulting slice and any errors that occurred. `f` should be of
-// type MapFunc. It also takes a channel `done` to signal early termination.
-//
-// The function takes an optional number of `Func` options that allow you to
-// customize the behavior of the function.
-//
-// If an error occurs during execution of `f`, it is stored and returned along
-// with the results. The order of the results matches the order of the input
-// slice.
-//
-// If any of the operations are cancelled by the context or through the cancelCh,
-// the function will return immediately.
-// MapDone is a generic concurrent mapping function that processes slices of items in parallel
-// while providing control over concurrency, delays, and result handling.
-//
-// Flow of the function:
-// 1. Initialize options and concurrency controls
-// 2. Set up error handling and result tracking
-// 3. Configure random delay if specified
-// 4. For each input item:
-//   - Check for early termination signals
-//   - Apply random delay if configured
-//   - Check processing limits
-//   - Acquire semaphore slot
-//   - Launch goroutine to process item:
-//   - Process item with provided function
-//   - Handle errors
-//   - Store results
-//   - Update counters
-//
-// 5. Wait for all processing to complete
-// 6. Return results and any errors
-//
-// Key Concepts:
-// - Generics: The function uses type parameters (T, Result) to work with any data types
-// - Concurrency: Uses goroutines for parallel processing
-// - Synchronization:
-//   - semaphore: Limits number of concurrent goroutines
-//   - WaitGroup: Tracks completion of all goroutines
-//   - Mutex: Protects shared resources (error slice)
-//
-// - Context: Handles cancellation and timeouts
-// - Atomic Operations: Thread-safe counting of processed results
-// - Channels: Used for signaling early termination
-// - Error Handling: Collects and returns errors from all goroutines
-//
-// Type Parameters:
-//   - T: The input type of items to be processed
-//   - Result: The output type after processing each item
-//
-// Parameters:
-//   - ctx: Context for cancellation and timeout control
-//   - items: Slice of input items to be processed
-//   - f: Function that processes each item and returns a Result
-//   - opts: Optional configuration functions to modify default behavior
-//
-// Returns:
-//   - []Result: Slice of processed results
-//   - Errors: Any errors encountered during processing
+// MapDone processes each element in a slice concurrently with early termination support.
+// The processing function receives a done channel that can be used to signal early termination.
+// Returns a slice of results and any errors that occurred during processing.
 //
 //nolint:funlen,gomnd,gocognit,mnd,gosec
 func MapDone[T any, Result any](
@@ -689,4 +665,218 @@ func MapDone[T any, Result any](
 	defer resMutex.Unlock()
 
 	return RemoveZeroValues(o.RemoveZeroValues, results), nil
+}
+
+// MapCh processes each key-value pair in a map concurrently with real-time result streaming.
+// It follows the same pattern as Map but sends results to channels instead of returning them.
+// Per-cycle results are sent to perCycleCh, final results (after RemoveZeroValues) are sent to endCh.
+// Returns only errors that occurred during processing.
+//
+//nolint:funlen,gomnd,gocognit,mnd,gosec,wsl
+func MapCh[T any, Result any](
+	ctx context.Context,
+	itemsMap map[string]T,
+	f MapMFuncCh[T, Result],
+	perCycleCh chan<- Result,
+	endCh chan<- Result,
+	opts ...Func,
+) Errors {
+	// Input Validation
+	if itemsMap == nil {
+		return []error{errors.New("itemsMap cannot be nil")}
+	}
+
+	if f == nil {
+		return []error{errors.New("mapping function cannot be nil")}
+	}
+
+	// At least one channel must be provided for result streaming
+	if perCycleCh == nil && endCh == nil {
+		return []error{errors.New("at least one channel (perCycleCh or endCh) must be provided")}
+	}
+
+	if len(itemsMap) == 0 {
+		return nil
+	}
+
+	o := Option{
+		BatchSize:        runtime.NumCPU(),
+		RemoveZeroValues: true,
+	}
+
+	for _, opt := range opts {
+		o = opt(o)
+	}
+
+	sem := semaphore.NewWeighted(int64(o.BatchSize))
+
+	wg := &sync.WaitGroup{}
+
+	// Collect results like Map does, but send them to channels instead of returning
+	results := make([]Result, 0, len(itemsMap))
+	resultKeys := make([]string, 0, len(itemsMap))
+
+	var (
+		errs     []error
+		errMutex sync.Mutex
+
+		resMutex sync.Mutex
+
+		resultTracker uint64 = 1
+	)
+
+	var rdmn *randomness.Randomness
+
+	if (o.RandomDelayTimeMin != 0 || o.RandomDelayTimeMax != 0) &&
+		o.RandomDelayTimeMin < o.RandomDelayTimeMax &&
+		o.RandomDelayTimeDuration != 0 {
+		r, err := randomness.New(o.RandomDelayTimeMin, o.RandomDelayTimeMax, 3, false)
+		if err != nil {
+			return []error{err}
+		}
+
+		rdmn = r
+	}
+
+itemLoop:
+	for key, item := range itemsMap {
+		select {
+		case <-ctx.Done():
+			// Context canceled, stop launching new goroutines
+			break itemLoop
+		default:
+			// Proceed with launching goroutine
+		}
+
+		// Randomness handling.
+		if rdmn != nil {
+			n, err := rdmn.Generate()
+			if err != nil {
+				return []error{err}
+			}
+
+			dS := time.Duration(n) * o.RandomDelayTimeDuration
+
+			mapLogger.Tracelnf("go routine is waiting for key %s for %v", key, dS)
+
+			time.Sleep(dS)
+		}
+
+		// Limit handling.
+		if o.Limit > 0 {
+			if atomic.LoadUint64(&resultTracker) > uint64(o.Limit) {
+				break itemLoop
+			}
+		}
+
+		// Context error handling.
+		if ctx.Err() != nil {
+			errMutex.Lock()
+			defer errMutex.Unlock()
+
+			errs = append(errs, customerror.New(fmt.Sprintf(`context errored before mapping "%+v"`, key)))
+
+			break itemLoop
+		}
+
+		// Semaphore handling.
+		if err := sem.Acquire(ctx, 1); err != nil {
+			errMutex.Lock()
+			defer errMutex.Unlock()
+
+			errs = append(errs, customerror.New(fmt.Sprintf(`context timeout before mapping "%+v"`, key)))
+
+			break itemLoop
+		}
+
+		//////
+		// Loop of items.
+		//////
+
+		wg.Add(1)
+
+		go func(k string, it T) {
+			defer sem.Release(1)
+			defer wg.Done()
+
+			select {
+			case <-ctx.Done():
+				// Context canceled, exit early
+				return
+			default:
+				// Proceed with processing
+			}
+
+			mapLogger.Tracelnf("go routine started, key %s", k)
+
+			res, err := f(ctx, k, it, perCycleCh, endCh)
+			if err != nil {
+				errMutex.Lock()
+				defer errMutex.Unlock()
+
+				errs = append(errs, customerror.New(
+					fmt.Sprintf("failed mapping, key %+v", k),
+					customerror.WithTag(Name),
+					customerror.WithError(err),
+				))
+
+				return
+			}
+
+			// Check limit.
+			if o.Limit > 0 {
+				if atomic.LoadUint64(&resultTracker) > uint64(o.Limit) {
+					return
+				}
+			}
+
+			resMutex.Lock()
+			results = append(results, res)
+			resultKeys = append(resultKeys, k)
+
+			// NOTE: perCycleCh is handled by the mapping function f itself
+			// MapCh only collects results and sends final results to endCh
+
+			// Write to writer if specified
+			if o.Writer != nil {
+				if resBytes, err := json.Marshal(res); err == nil {
+					o.Writer.Write(append(resBytes, '\n'))
+				}
+			}
+
+			resMutex.Unlock()
+
+			atomic.AddUint64(&resultTracker, 1)
+		}(key, item)
+	}
+
+	wg.Wait()
+
+	// Send final results to endCh after applying RemoveZeroValues
+	if endCh != nil {
+		resMutex.Lock()
+		finalResults := RemoveZeroValues(o.RemoveZeroValues, results)
+	endChLoop:
+		for _, result := range finalResults {
+			select {
+			case endCh <- result:
+			case <-ctx.Done():
+				break endChLoop
+			}
+		}
+		resMutex.Unlock()
+	}
+
+	// Check if context was canceled and prioritize its error
+	if ctx.Err() != nil {
+		errMutex.Lock()
+		errs = append([]error{ctx.Err()}, errs...)
+		errMutex.Unlock()
+	}
+
+	if len(errs) > 0 {
+		return errs
+	}
+
+	return nil
 }

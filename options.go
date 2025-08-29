@@ -1,6 +1,9 @@
 package concurrentloop
 
-import "time"
+import (
+	"io"
+	"time"
+)
 
 //////
 // Consts, vars and types.
@@ -28,6 +31,9 @@ type Option struct {
 
 	// RemoveZeroValues indicates whether to remove zero values from the results.
 	RemoveZeroValues bool
+
+	// Writer is an optional writer to write results to.
+	Writer io.Writer
 }
 
 //////
@@ -69,6 +75,15 @@ func WithRandomDelayTime(minDelay, maxDelay int, d time.Duration) Func {
 		o.RandomDelayTimeMin = minDelay
 
 		o.RandomDelayTimeDuration = d
+
+		return o
+	}
+}
+
+// WithWriter sets a writer to write results to.
+func WithWriter(w io.Writer) Func {
+	return func(o Option) Option {
+		o.Writer = w
 
 		return o
 	}

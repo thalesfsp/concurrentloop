@@ -6,8 +6,11 @@
 package concurrentloop
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
 	"testing"
 	"time"
 
@@ -339,4 +342,322 @@ func TestNew_ConcurrentProcessing_WithLimitCh(t *testing.T) {
 
 	// Check the results.
 	assert.Equal(t, 3, len(r1))
+}
+
+func TestMap_WithWriter(t *testing.T) {
+	sl1 := []int{1, 2, 3}
+
+	// Create a buffer to capture written output
+	var buf bytes.Buffer
+
+	// Create a function that will be called concurrently.
+	cF1 := func(_ context.Context, i int) (int, error) {
+		return i * 2, nil
+	}
+
+	// Call the function concurrently with writer option.
+	r1, err1 := Map(context.Background(), sl1, cF1, WithWriter(&buf))
+
+	if err1 != nil {
+		t.Errorf("Map() error = %v", err1)
+		return
+	}
+
+	// Check the results.
+	assert.Equal(t, []int{2, 4, 6}, r1)
+	assert.Equal(t, len(r1), len(sl1))
+
+	// Check that data was written to buffer
+	written := buf.String()
+	assert.NotEmpty(t, written)
+	assert.Contains(t, written, "2")
+	assert.Contains(t, written, "4")
+	assert.Contains(t, written, "6")
+}
+
+func TestMap_WithWriterToFile(t *testing.T) {
+	// Define a sales record structure
+	type SalesRecord struct {
+		ID      int     `json:"id"`
+		Product string  `json:"product"`
+		Amount  float64 `json:"amount"`
+		Date    string  `json:"date"`
+		Region  string  `json:"region"`
+	}
+
+	// Create fake sales data
+	salesData := []SalesRecord{
+		{ID: 1, Product: "Laptop", Amount: 1299.99, Date: "2024-01-15", Region: "North"},
+		{ID: 2, Product: "Mouse", Amount: 29.99, Date: "2024-01-16", Region: "South"},
+		{ID: 3, Product: "Keyboard", Amount: 89.99, Date: "2024-01-17", Region: "East"},
+		{ID: 4, Product: "Monitor", Amount: 449.99, Date: "2024-01-18", Region: "West"},
+		{ID: 5, Product: "Headphones", Amount: 199.99, Date: "2024-01-19", Region: "North"},
+		{ID: 6, Product: "Tablet", Amount: 599.99, Date: "2024-01-20", Region: "South"},
+		{ID: 7, Product: "Phone", Amount: 899.99, Date: "2024-01-21", Region: "East"},
+		{ID: 8, Product: "Webcam", Amount: 79.99, Date: "2024-01-22", Region: "West"},
+	}
+
+	// Create a temporary file
+	tempFile, err := os.CreateTemp("", "sales_output_*.json")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+
+	defer os.Remove(tempFile.Name()) // Clean up
+	defer tempFile.Close()
+
+	// Create a function that processes sales records and adds tax
+	processSales := func(_ context.Context, record SalesRecord) (SalesRecord, error) {
+		// Add 10% tax to the amount
+		record.Amount = record.Amount * 1.10
+		return record, nil
+	}
+
+	// Call Map with the writer option pointing to the temp file
+	results, errors := Map(context.Background(), salesData, processSales, WithWriter(tempFile))
+
+	if errors != nil {
+		t.Errorf("Map() error = %v", errors)
+		return
+	}
+
+	// Verify results
+	assert.Equal(t, len(salesData), len(results))
+	assert.InDelta(t, 1429.99, results[0].Amount, 0.01) // Allow small floating point difference
+
+	// Read the file content to verify data was written
+	tempFile.Close() // Close before reading
+
+	fileContent, err := os.ReadFile(tempFile.Name())
+	if err != nil {
+		t.Fatalf("Failed to read temp file: %v", err)
+	}
+
+	// Verify file is not empty and contains expected data
+	assert.NotEmpty(t, string(fileContent))
+	assert.Contains(t, string(fileContent), "Laptop")
+	assert.Contains(t, string(fileContent), "1429.989") // The actual calculated amount
+	assert.Contains(t, string(fileContent), "North")
+
+	// Verify JSON structure by attempting to unmarshal one line
+	lines := bytes.Split(fileContent, []byte("\n"))
+	var testRecord SalesRecord
+	err = json.Unmarshal(bytes.TrimSpace(lines[0]), &testRecord)
+	assert.NoError(t, err)
+	assert.NotZero(t, testRecord.ID)
+}
+
+func TestMapCh(t *testing.T) {
+	type TestStruct struct{ A string }
+
+	// Create channels for per-cycle and end results
+	perCycleCh := make(chan string, 10)
+	endCh := make(chan string, 10)
+
+	errs := MapCh(context.Background(), map[string]TestStruct{
+		"1": {A: "a"},
+		"2": {A: "b"},
+		"3": {A: "c"},
+	}, func(_ context.Context, key string, _ TestStruct, perCycle chan<- string, _ chan<- string) (string, error) {
+		// Send to per-cycle channel
+		if perCycle != nil {
+			select {
+			case perCycle <- "processing-" + key:
+			default:
+			}
+		}
+		return key, nil
+	}, perCycleCh, endCh)
+
+	if errs != nil {
+		t.Fatalf("MapCh() error = %v", errs)
+	}
+
+	// Close channels to allow range loops to finish
+	close(perCycleCh)
+	close(endCh)
+
+	// Check per-cycle results
+	perCycleResults := make([]string, 0)
+	for result := range perCycleCh {
+		perCycleResults = append(perCycleResults, result)
+	}
+	assert.Len(t, perCycleResults, 3)
+
+	// Check end results
+	endResults := make([]string, 0)
+	for result := range endCh {
+		endResults = append(endResults, result)
+	}
+	assert.Len(t, endResults, 3)
+}
+
+func TestMapCh_WithPerCycleFileOutput(t *testing.T) {
+	type TestStruct struct{ A string }
+
+	// Create a temporary file
+	tempFile, err := os.CreateTemp("", "per_cycle_output_*.txt")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+
+	defer os.Remove(tempFile.Name()) // Clean up
+	defer tempFile.Close()
+
+	// Create channels for per-cycle and end results
+	perCycleCh := make(chan string, 10)
+	endCh := make(chan string, 10)
+
+	// Start a goroutine to read from perCycleCh and write to file
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for result := range perCycleCh {
+			tempFile.WriteString(result + "\n")
+		}
+	}()
+
+	errs := MapCh(context.Background(), map[string]TestStruct{
+		"1": {A: "a"},
+		"2": {A: "b"},
+		"3": {A: "c"},
+	}, func(_ context.Context, key string, _ TestStruct, perCycle chan<- string, _ chan<- string) (string, error) {
+		// Send to per-cycle channel
+		if perCycle != nil {
+			select {
+			case perCycle <- "processing-" + key:
+			default:
+			}
+		}
+		return key, nil
+	}, perCycleCh, endCh)
+
+	if errs != nil {
+		t.Fatalf("MapCh() error = %v", errs)
+	}
+
+	// Close channels to allow goroutines to finish
+	close(perCycleCh)
+	close(endCh)
+
+	// Wait for file writing to complete
+	<-done
+
+	// Close file before reading
+	tempFile.Close()
+
+	// Read the file content to verify data was written
+	fileContent, err := os.ReadFile(tempFile.Name())
+	if err != nil {
+		t.Fatalf("Failed to read temp file: %v", err)
+	}
+
+	// Verify file is not empty and contains expected data
+	assert.NotEmpty(t, string(fileContent))
+	assert.Contains(t, string(fileContent), "processing-1")
+	assert.Contains(t, string(fileContent), "processing-2")
+	assert.Contains(t, string(fileContent), "processing-3")
+
+	// Count lines to ensure all results were written
+	lines := bytes.Split(bytes.TrimSpace(fileContent), []byte("\n"))
+	assert.Len(t, lines, 3)
+}
+
+func TestMapCh_WithNilChannels(t *testing.T) {
+	type TestStruct struct{ A string }
+
+	// Test with nil channels should now fail
+	errs := MapCh(context.Background(), map[string]TestStruct{
+		"1": {A: "a"},
+		"2": {A: "b"},
+		"3": {A: "c"},
+	}, func(_ context.Context, key string, _ TestStruct, perCycle chan<- string, end chan<- string) (string, error) {
+		// Function should handle nil channels gracefully
+		if perCycle != nil {
+			select {
+			case perCycle <- "processing-" + key:
+			default:
+			}
+		}
+		if end != nil {
+			select {
+			case end <- "completed-" + key:
+			default:
+			}
+		}
+		return key, nil
+	}, nil, nil) // Pass nil channels
+
+	// Should return an error when both channels are nil
+	if errs == nil {
+		t.Fatalf("MapCh() with nil channels should return an error")
+	}
+
+	assert.ErrorContains(t, errs, "at least one channel (perCycleCh or endCh) must be provided")
+}
+
+func TestMapCh_WithOnlyPerCycleChannel(t *testing.T) {
+	type TestStruct struct{ A string }
+
+	// Create only per-cycle channel, endCh is nil
+	perCycleCh := make(chan string, 10)
+
+	errs := MapCh(context.Background(), map[string]TestStruct{
+		"1": {A: "a"},
+		"2": {A: "b"},
+		"3": {A: "c"},
+	}, func(_ context.Context, key string, _ TestStruct, perCycle chan<- string, _ chan<- string) (string, error) {
+		// Send to per-cycle channel
+		if perCycle != nil {
+			select {
+			case perCycle <- "processing-" + key:
+			default:
+			}
+		}
+		return key, nil
+	}, perCycleCh, nil) // Only perCycleCh, endCh is nil
+
+	if errs != nil {
+		t.Fatalf("MapCh() error = %v", errs)
+	}
+
+	// Close channel to allow range loop to finish
+	close(perCycleCh)
+
+	// Check per-cycle results
+	perCycleResults := make([]string, 0)
+	for result := range perCycleCh {
+		perCycleResults = append(perCycleResults, result)
+	}
+	assert.Len(t, perCycleResults, 3)
+}
+
+func TestMapCh_WithOnlyEndChannel(t *testing.T) {
+	type TestStruct struct{ A string }
+
+	// Create only end channel, perCycleCh is nil
+	endCh := make(chan string, 10)
+
+	errs := MapCh(context.Background(), map[string]TestStruct{
+		"1": {A: "a"},
+		"2": {A: "b"},
+		"3": {A: "c"},
+	}, func(_ context.Context, key string, _ TestStruct, _ chan<- string, _ chan<- string) (string, error) {
+		// No per-cycle processing since perCycle is nil
+		return key, nil
+	}, nil, endCh) // perCycleCh is nil, only endCh
+
+	if errs != nil {
+		t.Fatalf("MapCh() error = %v", errs)
+	}
+
+	// Close channel to allow range loop to finish
+	close(endCh)
+
+	// Check end results
+	endResults := make([]string, 0)
+	for result := range endCh {
+		endResults = append(endResults, result)
+	}
+	assert.Len(t, endResults, 3)
 }
