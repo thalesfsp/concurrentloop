@@ -189,7 +189,7 @@ func TestMapM_withOptions(t *testing.T) {
 }
 
 //////
-// MapCH
+// MapCH.
 //////
 
 func TestNew_ConcurrentProcessingCh(t *testing.T) {
@@ -459,7 +459,7 @@ func TestMapCh(t *testing.T) {
 		"2": {A: "b"},
 		"3": {A: "c"},
 	}, func(_ context.Context, key string, _ TestStruct, perCycle chan<- string, _ chan<- string) (string, error) {
-		// Send to per-cycle channel
+		// Send to per-cycle channel.
 		if perCycle != nil {
 			select {
 			case perCycle <- "processing-" + key:
@@ -473,18 +473,18 @@ func TestMapCh(t *testing.T) {
 		t.Fatalf("MapCh() error = %v", errs)
 	}
 
-	// Close channels to allow range loops to finish
+	// Close channels to allow range loops to finish.
 	close(perCycleCh)
 	close(endCh)
 
-	// Check per-cycle results
+	// Check per-cycle results.
 	perCycleResults := make([]string, 0)
 	for result := range perCycleCh {
 		perCycleResults = append(perCycleResults, result)
 	}
 	assert.Len(t, perCycleResults, 3)
 
-	// Check end results
+	// Check end results.
 	endResults := make([]string, 0)
 	for result := range endCh {
 		endResults = append(endResults, result)
@@ -508,7 +508,7 @@ func TestMapCh_WithPerCycleFileOutput(t *testing.T) {
 	perCycleCh := make(chan string, 10)
 	endCh := make(chan string, 10)
 
-	// Start a goroutine to read from perCycleCh and write to file
+	// Start a goroutine to read from perCycleCh and write to file.
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -522,7 +522,7 @@ func TestMapCh_WithPerCycleFileOutput(t *testing.T) {
 		"2": {A: "b"},
 		"3": {A: "c"},
 	}, func(_ context.Context, key string, _ TestStruct, perCycle chan<- string, _ chan<- string) (string, error) {
-		// Send to per-cycle channel
+		// Send to per-cycle channel.
 		if perCycle != nil {
 			select {
 			case perCycle <- "processing-" + key:
@@ -536,29 +536,29 @@ func TestMapCh_WithPerCycleFileOutput(t *testing.T) {
 		t.Fatalf("MapCh() error = %v", errs)
 	}
 
-	// Close channels to allow goroutines to finish
+	// Close channels to allow goroutines to finish.
 	close(perCycleCh)
 	close(endCh)
 
-	// Wait for file writing to complete
+	// Wait for file writing to complete.
 	<-done
 
-	// Close file before reading
+	// Close file before reading.
 	tempFile.Close()
 
-	// Read the file content to verify data was written
+	// Read the file content to verify data was written.
 	fileContent, err := os.ReadFile(tempFile.Name())
 	if err != nil {
 		t.Fatalf("Failed to read temp file: %v", err)
 	}
 
-	// Verify file is not empty and contains expected data
+	// Verify file is not empty and contains expected data.
 	assert.NotEmpty(t, string(fileContent))
 	assert.Contains(t, string(fileContent), "processing-1")
 	assert.Contains(t, string(fileContent), "processing-2")
 	assert.Contains(t, string(fileContent), "processing-3")
 
-	// Count lines to ensure all results were written
+	// Count lines to ensure all results were written.
 	lines := bytes.Split(bytes.TrimSpace(fileContent), []byte("\n"))
 	assert.Len(t, lines, 3)
 }
@@ -566,7 +566,7 @@ func TestMapCh_WithPerCycleFileOutput(t *testing.T) {
 func TestMapCh_WithNilChannels(t *testing.T) {
 	type TestStruct struct{ A string }
 
-	// Test with nil channels should now fail
+	// Test with nil channels should now fail.
 	errs := MapCh(context.Background(), map[string]TestStruct{
 		"1": {A: "a"},
 		"2": {A: "b"},
@@ -588,7 +588,7 @@ func TestMapCh_WithNilChannels(t *testing.T) {
 		return key, nil
 	}, nil, nil) // Pass nil channels
 
-	// Should return an error when both channels are nil
+	// Should return an error when both channels are nil.
 	if errs == nil {
 		t.Fatalf("MapCh() with nil channels should return an error")
 	}
@@ -599,7 +599,7 @@ func TestMapCh_WithNilChannels(t *testing.T) {
 func TestMapCh_WithOnlyPerCycleChannel(t *testing.T) {
 	type TestStruct struct{ A string }
 
-	// Create only per-cycle channel, endCh is nil
+	// Create only per-cycle channel, endCh is nil.
 	perCycleCh := make(chan string, 10)
 
 	errs := MapCh(context.Background(), map[string]TestStruct{
@@ -607,7 +607,7 @@ func TestMapCh_WithOnlyPerCycleChannel(t *testing.T) {
 		"2": {A: "b"},
 		"3": {A: "c"},
 	}, func(_ context.Context, key string, _ TestStruct, perCycle chan<- string, _ chan<- string) (string, error) {
-		// Send to per-cycle channel
+		// Send to per-cycle channel.
 		if perCycle != nil {
 			select {
 			case perCycle <- "processing-" + key:
@@ -621,10 +621,10 @@ func TestMapCh_WithOnlyPerCycleChannel(t *testing.T) {
 		t.Fatalf("MapCh() error = %v", errs)
 	}
 
-	// Close channel to allow range loop to finish
+	// Close channel to allow range loop to finish.
 	close(perCycleCh)
 
-	// Check per-cycle results
+	// Check per-cycle results.
 	perCycleResults := make([]string, 0)
 	for result := range perCycleCh {
 		perCycleResults = append(perCycleResults, result)
@@ -635,7 +635,7 @@ func TestMapCh_WithOnlyPerCycleChannel(t *testing.T) {
 func TestMapCh_WithOnlyEndChannel(t *testing.T) {
 	type TestStruct struct{ A string }
 
-	// Create only end channel, perCycleCh is nil
+	// Create only end channel, perCycleCh is nil.
 	endCh := make(chan string, 10)
 
 	errs := MapCh(context.Background(), map[string]TestStruct{
@@ -651,10 +651,10 @@ func TestMapCh_WithOnlyEndChannel(t *testing.T) {
 		t.Fatalf("MapCh() error = %v", errs)
 	}
 
-	// Close channel to allow range loop to finish
+	// Close channel to allow range loop to finish.
 	close(endCh)
 
-	// Check end results
+	// Check end results.
 	endResults := make([]string, 0)
 	for result := range endCh {
 		endResults = append(endResults, result)
@@ -663,32 +663,32 @@ func TestMapCh_WithOnlyEndChannel(t *testing.T) {
 }
 
 // TestBreakStatementBehavior demonstrates why labeled breaks are necessary
-// when using break inside select statements within for loops
+// when using break inside select statements within for loops.
 func TestBreakStatementBehavior(t *testing.T) {
 	t.Run("unlabeled_break_only_exits_select", func(t *testing.T) {
 		processedItems := []string{}
 		items := []string{"a", "b", "c", "d", "e"}
 		cancelCtx, cancel := context.WithCancel(context.Background())
 
-		// Cancel immediately to trigger the break
+		// Cancel immediately to trigger the break.
 		cancel()
 
-		// Simulate the OLD behavior (without labeled break)
+		// Simulate the OLD behavior (without labeled break).
 		for _, item := range items {
 			select {
 			case <-cancelCtx.Done():
 				// This break only exits the select, NOT the for loop!
 				break
 			default:
-				// This won't execute due to canceled context
+				// This won't execute due to canceled context.
 			}
 
 			// ❌ This code STILL EXECUTES even after break!
-			// This is the problematic behavior we fixed
+			// This is the problematic behavior we fixed.
 			processedItems = append(processedItems, "processed-"+item)
 		}
 
-		// With unlabeled break, ALL items get processed despite context cancellation
+		// With unlabeled break, ALL items get processed despite context cancellation.
 		assert.Len(t, processedItems, 5, "Unlabeled break allows loop to continue processing all items")
 		assert.Equal(t, []string{
 			"processed-a", "processed-b", "processed-c", "processed-d", "processed-e",
@@ -700,10 +700,10 @@ func TestBreakStatementBehavior(t *testing.T) {
 		items := []string{"a", "b", "c", "d", "e"}
 		cancelCtx, cancel := context.WithCancel(context.Background())
 
-		// Cancel immediately to trigger the break
+		// Cancel immediately to trigger the break.
 		cancel()
 
-		// Simulate the NEW behavior (with labeled break)
+		// Simulate the NEW behavior (with labeled break).
 	itemLoop:
 		for _, item := range items {
 			select {
@@ -711,14 +711,14 @@ func TestBreakStatementBehavior(t *testing.T) {
 				// This break exits the ENTIRE for loop!
 				break itemLoop
 			default:
-				// This won't execute due to canceled context
+				// This won't execute due to canceled context.
 			}
 
-			// ✅ This code is NEVER reached when context is canceled
+			// ✅ This code is NEVER reached when context is canceled.
 			processedItems = append(processedItems, "processed-"+item)
 		}
 
-		// With labeled break, NO items get processed after context cancellation
+		// With labeled break, NO items get processed after context cancellation.
 		assert.Len(t, processedItems, 0, "Labeled break immediately exits the entire loop")
 		assert.Equal(t, []string{}, processedItems)
 	})
@@ -727,7 +727,7 @@ func TestBreakStatementBehavior(t *testing.T) {
 		items := []string{"item1", "item2", "item3", "item4", "item5"}
 		processedCount := 0
 
-		// Create context that times out after 50ms
+		// Create context that times out after 50ms.
 		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 		defer cancel()
 
@@ -738,13 +738,13 @@ func TestBreakStatementBehavior(t *testing.T) {
 			select {
 			case <-ctx.Done():
 				t.Logf("Context canceled after processing %d items in %v", processedCount, time.Since(startTime))
-				// Labeled break ensures we immediately stop processing
+				// Labeled break ensures we immediately stop processing.
 				break processingLoop
 			default:
-				// Proceed with processing
+				// Proceed with processing.
 			}
 
-			// Simulate some processing time
+			// Simulate some processing time.
 			time.Sleep(20 * time.Millisecond)
 
 			processedCount++
@@ -753,7 +753,7 @@ func TestBreakStatementBehavior(t *testing.T) {
 
 		elapsed := time.Since(startTime)
 
-		// We should have processed fewer than all items due to timeout
+		// We should have processed fewer than all items due to timeout.
 		assert.Less(t, processedCount, len(items), "Should process fewer items due to context timeout")
 		assert.Less(t, elapsed, 100*time.Millisecond, "Should exit quickly after context timeout")
 

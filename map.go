@@ -155,10 +155,10 @@ indexLoop:
 	for index := range items {
 		select {
 		case <-ctx.Done():
-			// Context canceled, stop launching new goroutines
+			// Context canceled, stop launching new goroutines.
 			break indexLoop
 		default:
-			// Proceed with launching goroutine
+			// Proceed with launching goroutine.
 		}
 
 		// Randomness handling.
@@ -215,10 +215,10 @@ indexLoop:
 
 			select {
 			case <-ctx.Done():
-				// Context canceled, exit early
+				// Context canceled, exit early.
 				return
 			default:
-				// Proceed with processing
+				// Proceed with processing.
 			}
 
 			mapLogger.Tracelnf("go routine %d started", index)
@@ -237,7 +237,7 @@ indexLoop:
 				return
 			}
 
-			// Check if result i exists
+			// Check if result i exists.
 			if len(results) <= index {
 				errMutex.Lock()
 				defer errMutex.Unlock()
@@ -261,7 +261,7 @@ indexLoop:
 			resMutex.Lock()
 			results[index] = res
 
-			// Write to writer if specified
+			// Write to writer if specified.
 			if o.Writer != nil {
 				if resBytes, err := json.Marshal(res); err == nil {
 					o.Writer.Write(append(resBytes, '\n'))
@@ -276,7 +276,7 @@ indexLoop:
 
 	wg.Wait()
 
-	// Check if context was canceled and prioritize its error
+	// Check if context was canceled and prioritize its error.
 	if ctx.Err() != nil {
 		errMutex.Lock()
 		errs = append([]error{ctx.Err()}, errs...)
@@ -354,10 +354,10 @@ keyLoop:
 	for key, item := range itemsMap {
 		select {
 		case <-ctx.Done():
-			// Context canceled, stop launching new goroutines
+			// Context canceled, stop launching new goroutines.
 			break keyLoop
 		default:
-			// Proceed with launching goroutine
+			// Proceed with launching goroutine.
 		}
 
 		// Randomness handling.
@@ -445,7 +445,7 @@ keyLoop:
 			resMutex.Lock()
 			results = append(results, res)
 
-			// Write to writer if specified
+			// Write to writer if specified.
 			if o.Writer != nil {
 				if resBytes, err := json.Marshal(res); err == nil {
 					o.Writer.Write(append(resBytes, '\n'))
@@ -460,7 +460,7 @@ keyLoop:
 
 	wg.Wait()
 
-	// Write to writer as JSON array if specified
+	// Write to writer as JSON array if specified.
 	if o.Writer != nil {
 		finalResults := RemoveZeroValues(o.RemoveZeroValues, results)
 		if resultsBytes, err := json.Marshal(finalResults); err == nil {
@@ -468,7 +468,7 @@ keyLoop:
 		}
 	}
 
-	// Check if context was canceled and prioritize its error
+	// Check if context was canceled and prioritize its error.
 	if ctx.Err() != nil {
 		errMutex.Lock()
 		errs = append([]error{ctx.Err()}, errs...)
@@ -742,10 +742,10 @@ itemLoop:
 	for key, item := range itemsMap {
 		select {
 		case <-ctx.Done():
-			// Context canceled, stop launching new goroutines
+			// Context canceled, stop launching new goroutines.
 			break itemLoop
 		default:
-			// Proceed with launching goroutine
+			// Proceed with launching goroutine.
 		}
 
 		// Randomness handling.
@@ -801,10 +801,10 @@ itemLoop:
 
 			select {
 			case <-ctx.Done():
-				// Context canceled, exit early
+				// Context canceled, exit early.
 				return
 			default:
-				// Proceed with processing
+				// Proceed with processing.
 			}
 
 			mapLogger.Tracelnf("go routine started, key %s", k)
@@ -834,10 +834,10 @@ itemLoop:
 			results = append(results, res)
 			resultKeys = append(resultKeys, k)
 
-			// NOTE: perCycleCh is handled by the mapping function f itself
-			// MapCh only collects results and sends final results to endCh
+			// NOTE: perCycleCh is handled by the mapping function f itself.
+			// MapCh only collects results and sends final results to endCh.
 
-			// Write to writer if specified
+			// Write to writer if specified.
 			if o.Writer != nil {
 				if resBytes, err := json.Marshal(res); err == nil {
 					o.Writer.Write(append(resBytes, '\n'))
@@ -852,7 +852,7 @@ itemLoop:
 
 	wg.Wait()
 
-	// Send final results to endCh after applying RemoveZeroValues
+	// Send final results to endCh after applying RemoveZeroValues.
 	if endCh != nil {
 		resMutex.Lock()
 		finalResults := RemoveZeroValues(o.RemoveZeroValues, results)
@@ -867,7 +867,7 @@ itemLoop:
 		resMutex.Unlock()
 	}
 
-	// Check if context was canceled and prioritize its error
+	// Check if context was canceled and prioritize its error.
 	if ctx.Err() != nil {
 		errMutex.Lock()
 		errs = append([]error{ctx.Err()}, errs...)
