@@ -293,7 +293,30 @@ indexLoop:
 		}(index)
 	}
 
-	wg.Wait()
+	// Wait for all worker goroutines OR the caller's context to fire,
+	// whichever comes first. See waitForWaitGroupOrCtx godoc below for
+	// the full rationale — without it, a worker stuck inside a leaked
+	// downstream goroutine (e.g. thalesfsp/ebi.BulkCreate's metrics
+	// loop) would block wg.Wait forever, holding the caller hostage
+	// past ctx.Err(). The 2026-05-01 proj-ringboost-vendor v195→v196
+	// rotation hung for 2+ hours via this exact path. Regression test:
+	// TestMap_StuckChild_CtxFires_ReturnsWithinBound.
+	if err := waitForWaitGroupOrCtx(ctx, wg); err != nil {
+		// Snapshot results so a late writer cannot race with the caller
+		// reading the returned slice. results is index-addressed so the
+		// snapshot is a stable view; late writes by leaked goroutines
+		// land in the original (now-orphaned) slice.
+		resMutex.Lock()
+		snapshot := make([]Result, len(results))
+		copy(snapshot, results)
+		resMutex.Unlock()
+
+		errMutex.Lock()
+		errs = append([]error{err}, errs...)
+		errMutex.Unlock()
+
+		return RemoveZeroValues(o.RemoveZeroValues, snapshot), errs
+	}
 
 	// Check if context was canceled and prioritize its error.
 	if ctx.Err() != nil {
@@ -307,6 +330,34 @@ indexLoop:
 	}
 
 	return RemoveZeroValues(o.RemoveZeroValues, results), nil
+}
+
+// waitForWaitGroupOrCtx blocks until either wg.Wait() returns OR ctx fires
+// Done(). Returns ctx.Err() if ctx fired first, nil if all workers finished.
+//
+// This is the safety net that ensures Map/MapM cannot hang indefinitely
+// when a worker goroutine fails to call wg.Done() — for example because
+// it is blocked on a leaked goroutine in a downstream library that does
+// not honor context cancellation. Without this, a single misbehaving
+// child can hold every concurrent caller hostage forever.
+//
+// The "waiter" goroutine spawned here is bounded: it returns as soon as
+// wg.Wait() returns, regardless of whether the parent select picked the
+// ctx branch. So no extra goroutine leak is introduced by this helper —
+// see TestMap_NoGoroutineLeakFromHelper for the regression guard.
+func waitForWaitGroupOrCtx(ctx context.Context, wg *sync.WaitGroup) error {
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // MapM processes each key-value pair in a map concurrently using the provided function.
@@ -490,7 +541,24 @@ keyLoop:
 		}(key, item)
 	}
 
-	wg.Wait()
+	// See waitForWaitGroupOrCtx godoc above (used by Map). Same rationale
+	// here: a worker goroutine blocked on a leaked downstream goroutine
+	// must NOT hold the caller hostage past ctx.Err(). Snapshot results
+	// under resMutex on early return to keep concurrent late-writers
+	// race-free against the caller. Regression test:
+	// TestMapM_StuckChild_CtxFires_ReturnsWithinBound.
+	if err := waitForWaitGroupOrCtx(ctx, wg); err != nil {
+		resMutex.Lock()
+		snapshot := make([]Result, len(results))
+		copy(snapshot, results)
+		resMutex.Unlock()
+
+		errMutex.Lock()
+		errs = append([]error{err}, errs...)
+		errMutex.Unlock()
+
+		return RemoveZeroValues(o.RemoveZeroValues, snapshot), errs
+	}
 
 	// Write to writer as JSON array if specified.
 	if o.Writer != nil {
