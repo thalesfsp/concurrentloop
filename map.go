@@ -302,10 +302,22 @@ indexLoop:
 	// rotation hung for 2+ hours via this exact path. Regression test:
 	// TestMap_StuckChild_CtxFires_ReturnsWithinBound.
 	if err := waitForWaitGroupOrCtx(ctx, wg); err != nil {
-		// Snapshot results so a late writer cannot race with the caller
-		// reading the returned slice. results is index-addressed so the
-		// snapshot is a stable view; late writes by leaked goroutines
-		// land in the original (now-orphaned) slice.
+		// Snapshot results AND errs under their respective mutexes so
+		// a late-acquiring worker (still running because waitForWait
+		// GroupOrCtx returned via the ctx branch, not the wg branch)
+		// cannot race with the caller reading the returned slices.
+		//
+		// v1.4.3 snapshotted results but NOT errs — caught by Grok
+		// review on UVS v2.0.118. errs uses append() which can
+		// reallocate the backing array; the parent's returned slice
+		// header would point at the pre-append memory while a late
+		// worker's append produced a new array, leaving the parent's
+		// reads racing the worker's writes against the original
+		// (potentially recycled) array.
+		//
+		// Both snapshots are taken under their own locks; the locks
+		// are independent so we acquire+release each in turn rather
+		// than holding both simultaneously.
 		resMutex.Lock()
 		snapshot := make([]Result, len(results))
 		copy(snapshot, results)
@@ -313,9 +325,11 @@ indexLoop:
 
 		errMutex.Lock()
 		errs = append([]error{err}, errs...)
+		errsSnapshot := make([]error, len(errs))
+		copy(errsSnapshot, errs)
 		errMutex.Unlock()
 
-		return RemoveZeroValues(o.RemoveZeroValues, snapshot), errs
+		return RemoveZeroValues(o.RemoveZeroValues, snapshot), errsSnapshot
 	}
 
 	// Check if context was canceled and prioritize its error.
@@ -544,9 +558,15 @@ keyLoop:
 	// See waitForWaitGroupOrCtx godoc above (used by Map). Same rationale
 	// here: a worker goroutine blocked on a leaked downstream goroutine
 	// must NOT hold the caller hostage past ctx.Err(). Snapshot results
-	// under resMutex on early return to keep concurrent late-writers
-	// race-free against the caller. Regression test:
-	// TestMapM_StuckChild_CtxFires_ReturnsWithinBound.
+	// AND errs under their respective mutexes on early return to keep
+	// concurrent late-writers race-free against the caller. Regression
+	// tests: TestMapM_StuckChild_CtxFires_ReturnsWithinBound (timing)
+	// and TestMapM_LateWorker_ErrsSliceRaceFree (race).
+	//
+	// v1.4.4 fix: errs is now snapshotted symmetrically with results.
+	// v1.4.3 only snapshotted results, leaving the errs slice header
+	// racy when a late-acquiring worker appends after the parent's
+	// errMutex.Unlock — caught by Grok 4.20 review on UVS v2.0.118.
 	if err := waitForWaitGroupOrCtx(ctx, wg); err != nil {
 		resMutex.Lock()
 		snapshot := make([]Result, len(results))
@@ -555,9 +575,11 @@ keyLoop:
 
 		errMutex.Lock()
 		errs = append([]error{err}, errs...)
+		errsSnapshot := make([]error, len(errs))
+		copy(errsSnapshot, errs)
 		errMutex.Unlock()
 
-		return RemoveZeroValues(o.RemoveZeroValues, snapshot), errs
+		return RemoveZeroValues(o.RemoveZeroValues, snapshot), errsSnapshot
 	}
 
 	// Write to writer as JSON array if specified.
