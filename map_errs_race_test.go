@@ -226,6 +226,176 @@ func TestMap_LateWorker_ErrsSliceRaceFree(t *testing.T) {
 	}
 }
 
+// TestMapM_KeyLoopCtxErr_DoesNotSelfDeadlock guards against the
+// v1.4.4 Grok-followup deadlock: when ctx fires AFTER the keyLoop's
+// top `select <-ctx.Done()` but BEFORE the second `if ctx.Err() != nil`
+// check, the second check pre-fix did:
+//
+//	errMutex.Lock()
+//	defer errMutex.Unlock()    // ← BUG: defer fires on MapM return,
+//	errs = append(errs, ...)   //         not on `break keyLoop`
+//	break keyLoop
+//
+// After the break, execution reaches the post-wait snapshot block at
+// the bottom of MapM (the v1.4.4 fix site), which calls
+// errMutex.Lock() AGAIN on the same goroutine. Go's sync.Mutex is
+// non-recursive — the second Lock blocks forever, deadlocking MapM.
+//
+// Pre-fix: this test hangs (deadlock) and times out via the t.Run
+// deadline. Post-fix (explicit Unlock before break): returns within
+// a few milliseconds.
+//
+// Run under `-race -timeout 30s` to ensure a hang surfaces as a
+// deterministic test failure, not an indefinite stall.
+func TestMapM_KeyLoopCtxErr_DoesNotSelfDeadlock(t *testing.T) {
+	t.Parallel()
+
+	// We need ctx to fire WHILE the keyLoop is iterating but past the
+	// top select-default. The `RandomDelayTime*` options inject a
+	// sleep AFTER the top-select but BEFORE the second `if ctx.Err()`
+	// check — which gives us a deterministic window in which to
+	// cancel ctx and force the keyLoop into the racy second-check
+	// branch.
+	itemsMap := make(map[string]int, 4)
+	for i := 0; i < 4; i++ {
+		itemsMap[string(rune('a'+i))] = i
+	}
+
+	mapper := func(_ context.Context, _ string, _ int) (string, error) {
+		// Workers themselves are fast; the keyLoop body is what we
+		// want to slow down so ctx can fire mid-iteration.
+		return "", nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Bound the entire test on 5s — pre-fix deadlock manifests as an
+	// indefinite hang; we want a clean t.Fatalf under timeout.
+	done := make(chan struct{})
+	go func() {
+		// Inject a 50ms randomness sleep per iteration. This widens
+		// the window between top-select-default and the second
+		// ctx.Err check enough to make ctx-cancel deterministic.
+		_, _ = MapM(ctx, itemsMap, mapper,
+			WithRandomDelayTime(1, 2, 50*time.Millisecond),
+		)
+		close(done)
+	}()
+
+	// Cancel ctx after a short delay so it fires while a keyLoop
+	// iteration is in its randomness sleep.
+	time.Sleep(25 * time.Millisecond)
+	cancel()
+
+	select {
+	case <-done:
+		// MapM returned within the deadline — no deadlock.
+	case <-time.After(5 * time.Second):
+		t.Fatal("MapM did not return within 5s after ctx cancel — " +
+			"likely the v1.4.4 keyLoop ctx-err defer-Unlock deadlock " +
+			"reintroduced. Check `if ctx.Err() != nil` and " +
+			"`if err := sem.Acquire(...)` blocks in MapM keyLoop: " +
+			"they MUST use explicit errMutex.Unlock() before " +
+			"`break keyLoop`, NOT defer (defer fires on function " +
+			"return, leaving the mutex held when the post-wait " +
+			"snapshot block tries to re-Lock).")
+	}
+}
+
+// TestKeyLoopMutexDiscipline_StructuralAudit asserts the absence of
+// the deadlock pattern in MapM's keyLoop: `errMutex.Lock()` followed
+// by `defer errMutex.Unlock()` followed by `break keyLoop`. Same
+// pattern as TestEarlyReturnSnapshotInvariant_StructuralAudit:
+// catches the regression at PR review time without needing the timing
+// window to fire.
+func TestKeyLoopMutexDiscipline_StructuralAudit(t *testing.T) {
+	src := readMapSourceForInvariantTest(t)
+
+	// The DEADLOCK pattern is `defer errMutex.Unlock()` followed
+	// within ~6 lines by `break <label>`. defer fires on function
+	// return, NOT on labeled-loop break — so the mutex stays held
+	// when execution continues past the loop and the post-wait
+	// snapshot block tries to errMutex.Lock again on the same
+	// goroutine, self-deadlocking.
+	//
+	// SAFE patterns (NOT flagged):
+	//   - `defer errMutex.Unlock()` followed by `return` (defer fires
+	//     correctly on the return).
+	//   - `defer errMutex.Unlock()` inside a worker goroutine that
+	//     ends via `return` (defer fires when the worker goroutine's
+	//     func returns — no follow-on Lock by the same goroutine).
+	//
+	// We scan line-by-line: for each `defer errMutex.Unlock()`, peek
+	// the next 6 lines; if a `break <label>` appears before any
+	// `return` or end-of-block, the site is dangerous.
+	lines := strings.Split(src, "\n")
+	var offending []string
+	for i, line := range lines {
+		if !strings.Contains(line, "defer errMutex.Unlock()") {
+			continue
+		}
+		end := i + 7
+		if end > len(lines) {
+			end = len(lines)
+		}
+		for j := i + 1; j < end; j++ {
+			next := lines[j]
+			// `return` first → safe pattern; stop scanning this site.
+			if strings.Contains(next, "return ") || strings.Contains(next, "return\t") {
+				break
+			}
+			// `break <something>` (with a label) → DEADLOCK pattern.
+			// Bare `break` inside a `select` is fine because select
+			// is itself terminating — but our convention here is that
+			// labeled breaks are the dangerous shape. Match `break <ident>`.
+			trimmed := strings.TrimSpace(next)
+			if strings.HasPrefix(trimmed, "break ") && trimmed != "break" {
+				start := i - 2
+				if start < 0 {
+					start = 0
+				}
+				ctxEnd := j + 1
+				if ctxEnd > len(lines) {
+					ctxEnd = len(lines)
+				}
+				offending = append(offending,
+					"map.go:"+itoa(i+1)+" (defer) → map.go:"+itoa(j+1)+" (break):\n"+
+						strings.Join(lines[start:ctxEnd], "\n"))
+				break
+			}
+		}
+	}
+	if len(offending) > 0 {
+		t.Fatalf("v1.4.4 deadlock-pattern reintroduced: %d site(s) of "+
+			"`defer errMutex.Unlock()` followed by `break <label>` found in "+
+			"map.go.\n\ndefer fires on FUNCTION return, NOT on labeled-loop "+
+			"break — leaving errMutex held when execution continues past the "+
+			"loop and the post-wait snapshot block (or wg.Wait + worker err "+
+			"path) tries to re-Lock errMutex, self-deadlocking the goroutine.\n\n"+
+			"Use explicit errMutex.Unlock() BEFORE `break <label>`. Safe "+
+			"patterns (defer + return, defer in worker goroutine ending in "+
+			"return) are NOT flagged.\n\nOffending sites:\n%s",
+			len(offending), strings.Join(offending, "\n\n"))
+	}
+}
+
+// itoa is a tiny strconv-free integer-to-string helper (avoid pulling
+// strconv just for failure messages).
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var buf [20]byte
+	i := len(buf)
+	for n > 0 {
+		i--
+		buf[i] = byte('0' + n%10)
+		n /= 10
+	}
+	return string(buf[i:])
+}
+
 // TestEarlyReturnSnapshotInvariant_StructuralAudit is a structural
 // guard: scans map.go and asserts that EVERY early-return path which
 // can race with concurrent workers snapshots BOTH `results` AND

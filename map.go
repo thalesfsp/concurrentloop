@@ -466,21 +466,29 @@ keyLoop:
 		}
 
 		// Context error handling.
+		//
+		// v1.4.4 Grok-followup: explicit Unlock (NOT defer) before
+		// `break keyLoop`. defer fires on FUNCTION return, not on
+		// loop break — so a deferred Unlock here would leave errMutex
+		// held when execution continues to the post-wait snapshot
+		// block at line ~570 below, which calls errMutex.Lock again
+		// on the SAME goroutine and self-deadlocks (Go mutexes are
+		// not recursive). Hold the lock only for the append, then
+		// release explicitly.
 		if ctx.Err() != nil {
 			errMutex.Lock()
-			defer errMutex.Unlock()
-
 			errs = append(errs, customerror.New(fmt.Sprintf(`context errored before mapping "%+v"`, key)))
+			errMutex.Unlock()
 
 			break keyLoop
 		}
 
-		// Semaphore handling.
+		// Semaphore handling. Same explicit-Unlock discipline as the
+		// ctx-err block above (v1.4.4 Grok-followup deadlock fix).
 		if err := sem.Acquire(ctx, 1); err != nil {
 			errMutex.Lock()
-			defer errMutex.Unlock()
-
 			errs = append(errs, customerror.New(fmt.Sprintf(`context timeout before mapping "%+v"`, key)))
+			errMutex.Unlock()
 
 			break keyLoop
 		}
@@ -900,21 +908,28 @@ itemLoop:
 		}
 
 		// Context error handling.
+		//
+		// v1.4.4 Grok-followup: explicit Unlock (NOT defer) before
+		// `break itemLoop` — same deadlock anti-pattern as MapM's
+		// keyLoop. After the break, MapCh calls wg.Wait() to drain
+		// workers; any worker that calls errMutex.Lock() in its own
+		// err path (e.g. the writer-error block) blocks waiting for
+		// the deferred Unlock that only fires on MapCh return — the
+		// worker never completes, wg.Wait never returns, MapCh hangs.
 		if ctx.Err() != nil {
 			errMutex.Lock()
-			defer errMutex.Unlock()
-
 			errs = append(errs, customerror.New(fmt.Sprintf(`context errored before mapping "%+v"`, key)))
+			errMutex.Unlock()
 
 			break itemLoop
 		}
 
-		// Semaphore handling.
+		// Semaphore handling. Same explicit-Unlock discipline as the
+		// ctx-err block above (v1.4.4 Grok-followup deadlock fix).
 		if err := sem.Acquire(ctx, 1); err != nil {
 			errMutex.Lock()
-			defer errMutex.Unlock()
-
 			errs = append(errs, customerror.New(fmt.Sprintf(`context timeout before mapping "%+v"`, key)))
+			errMutex.Unlock()
 
 			break itemLoop
 		}
