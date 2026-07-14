@@ -108,7 +108,11 @@ func TestMapM_LateWorker_ErrsSliceRaceFree(t *testing.T) {
 	}, 1)
 
 	go func() {
-		_, errs := MapM(ctx, itemsMap, mapper)
+		// WithBatchSize(concurrency) guarantees all `concurrency` workers
+		// run at once regardless of runtime.NumCPU(); the default BatchSize
+		// (= NumCPU) lets only NumCPU workers start on low-core CI runners,
+		// so the "wait for all workers to start" loop below would time out.
+		_, errs := MapM(ctx, itemsMap, mapper, WithBatchSize(concurrency))
 		resultsCh <- struct{ errs []error }{errs}
 	}()
 
@@ -196,7 +200,10 @@ func TestMap_LateWorker_ErrsSliceRaceFree(t *testing.T) {
 	}, 1)
 
 	go func() {
-		_, errs := Map(ctx, items, mapper)
+		// WithBatchSize(concurrency): see the sibling MapM race test — the
+		// default BatchSize (= NumCPU) would start only NumCPU workers on
+		// low-core CI runners, timing out the "all workers started" wait.
+		_, errs := Map(ctx, items, mapper, WithBatchSize(concurrency))
 		resultsCh <- struct{ errs []error }{errs}
 	}()
 
