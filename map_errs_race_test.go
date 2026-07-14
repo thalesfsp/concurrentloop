@@ -69,7 +69,7 @@ func TestMapM_LateWorker_ErrsSliceRaceFree(t *testing.T) {
 
 	const concurrency = 8
 	itemsMap := make(map[string]int, concurrency)
-	for i := 0; i < concurrency; i++ {
+	for i := range concurrency {
 		itemsMap[string(rune('a'+i))] = i
 	}
 
@@ -79,7 +79,7 @@ func TestMapM_LateWorker_ErrsSliceRaceFree(t *testing.T) {
 	releaseWorkers := make(chan struct{})
 	var slowWorkerCompleted atomic.Bool
 
-	mapper := func(ctx context.Context, key string, val int) (string, error) {
+	mapper := func(ctx context.Context, key string, _ int) (string, error) {
 		workerStarted <- struct{}{}
 		// Block until released — caller cancels ctx while we're stuck.
 		select {
@@ -88,17 +88,17 @@ func TestMapM_LateWorker_ErrsSliceRaceFree(t *testing.T) {
 			// the worker callback. The race window: parent already
 			// returned and is reading the errs slice header.
 			slowWorkerCompleted.Store(true)
-			return "", errors.New("late worker error: " + key)
+			return key, errors.New("late worker error: " + key)
 		case <-ctx.Done():
 			// Worker honors ctx — but only AFTER our test triggers it.
 			// Don't return here; we want the late-error path.
 			<-releaseWorkers
 			slowWorkerCompleted.Store(true)
-			return "", errors.New("late worker error after ctx: " + key)
+			return key, errors.New("late worker error after ctx: " + key)
 		}
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	// Run MapM in a goroutine; cancel ctx after all workers have
@@ -114,7 +114,7 @@ func TestMapM_LateWorker_ErrsSliceRaceFree(t *testing.T) {
 
 	// Wait for all workers to be running (proves the goroutines are
 	// alive when ctx fires).
-	for i := 0; i < concurrency; i++ {
+	for i := range concurrency {
 		select {
 		case <-workerStarted:
 		case <-time.After(2 * time.Second):
@@ -138,7 +138,7 @@ func TestMapM_LateWorker_ErrsSliceRaceFree(t *testing.T) {
 
 	// Hammer the slice header to give the race detector a chance to
 	// observe the conflict if it exists.
-	for i := 0; i < 10000; i++ {
+	for range 10000 {
 		_ = len(got.errs)
 		_ = cap(got.errs)
 		if len(got.errs) > 0 {
@@ -181,14 +181,14 @@ func TestMap_LateWorker_ErrsSliceRaceFree(t *testing.T) {
 		workerStarted <- struct{}{}
 		select {
 		case <-releaseWorkers:
-			return "", errors.New("late worker error")
+			return string(rune('a' + val)), errors.New("late worker error")
 		case <-ctx.Done():
 			<-releaseWorkers
-			return "", errors.New("late worker error after ctx")
+			return string(rune('a' + val)), errors.New("late worker error after ctx")
 		}
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	resultsCh := make(chan struct {
@@ -200,7 +200,7 @@ func TestMap_LateWorker_ErrsSliceRaceFree(t *testing.T) {
 		resultsCh <- struct{ errs []error }{errs}
 	}()
 
-	for i := 0; i < concurrency; i++ {
+	for i := range concurrency {
 		select {
 		case <-workerStarted:
 		case <-time.After(2 * time.Second):
@@ -213,7 +213,7 @@ func TestMap_LateWorker_ErrsSliceRaceFree(t *testing.T) {
 
 	got := <-resultsCh
 
-	for i := 0; i < 10000; i++ {
+	for range 10000 {
 		_ = len(got.errs)
 		_ = cap(got.errs)
 		if len(got.errs) > 0 {
@@ -257,7 +257,7 @@ func TestMapM_KeyLoopCtxErr_DoesNotSelfDeadlock(t *testing.T) {
 	// cancel ctx and force the keyLoop into the racy second-check
 	// branch.
 	itemsMap := make(map[string]int, 4)
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		itemsMap[string(rune('a'+i))] = i
 	}
 
@@ -267,7 +267,7 @@ func TestMapM_KeyLoopCtxErr_DoesNotSelfDeadlock(t *testing.T) {
 		return "", nil
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	// Bound the entire test on 5s — pre-fix deadlock manifests as an
@@ -475,7 +475,7 @@ func TestEarlyReturnSnapshotInvariant_StructuralAudit(t *testing.T) {
 var (
 	mapSrcOnce  sync.Once
 	mapSrcCache string
-	mapSrcErr   error
+	errMapSrc   error
 )
 
 func readMapSourceForInvariantTest(t *testing.T) string {
@@ -484,13 +484,13 @@ func readMapSourceForInvariantTest(t *testing.T) string {
 		// We're in the package's test binary; CWD is the package dir.
 		b, err := os.ReadFile("map.go")
 		if err != nil {
-			mapSrcErr = err
+			errMapSrc = err
 			return
 		}
 		mapSrcCache = string(b)
 	})
-	if mapSrcErr != nil {
-		t.Fatalf("read map.go: %v", mapSrcErr)
+	if errMapSrc != nil {
+		t.Fatalf("read map.go: %v", errMapSrc)
 	}
 	return mapSrcCache
 }
