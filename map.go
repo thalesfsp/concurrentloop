@@ -17,8 +17,8 @@ import (
 
 	"github.com/thalesfsp/customerror"
 	"github.com/thalesfsp/randomness"
-	"github.com/thalesfsp/sypl"
-	"github.com/thalesfsp/sypl/level"
+	"github.com/thalesfsp/sypl/v2"
+	"github.com/thalesfsp/sypl/v2/level"
 	"golang.org/x/sync/semaphore"
 )
 
