@@ -37,13 +37,6 @@ import (
 // mode where a downstream library leaks a goroutine that never lets the
 // caller's worker finish.
 
-// blockingFnHonorsCtx returns when its ctx fires Done(). Used to exercise
-// the "ctx fires, children unwind cleanly" path.
-func blockingFnHonorsCtx[T any](_ context.Context, _ T) (T, error) {
-	var zero T
-	return zero, nil
-}
-
 // stuckMapFn never returns until release is closed. It deliberately
 // IGNORES ctx — this is the failure mode we're guarding against. The
 // returned release function MUST be called via t.Cleanup so the
@@ -74,7 +67,7 @@ func TestMap_HappyPath_AllItemsProcessed(t *testing.T) {
 		return v * 2, nil
 	}
 
-	results, errs := Map(context.Background(), items, double)
+	results, errs := Map(t.Context(), items, double)
 
 	if len(errs) != 0 {
 		t.Fatalf("expected no errors, got %d: %v", len(errs), errs)
@@ -101,7 +94,7 @@ func TestMapM_HappyPath_AllKeysProcessed(t *testing.T) {
 		return v + 100, nil
 	}
 
-	results, errs := MapM(context.Background(), itemsMap, upper)
+	results, errs := MapM(t.Context(), itemsMap, upper)
 
 	if len(errs) != 0 {
 		t.Fatalf("expected no errors, got %d: %v", len(errs), errs)
@@ -126,7 +119,7 @@ func TestMap_FuncReturnsError_CollectedInErrors(t *testing.T) {
 		return v, nil
 	}
 
-	_, errs := Map(context.Background(), items, failOnTwo)
+	_, errs := Map(t.Context(), items, failOnTwo)
 
 	if len(errs) == 0 {
 		t.Fatal("expected at least one error, got none")
@@ -155,7 +148,7 @@ func TestMapM_FuncReturnsError_CollectedInErrors(t *testing.T) {
 		return v, nil
 	}
 
-	_, errs := MapM(context.Background(), itemsMap, failOn999)
+	_, errs := MapM(t.Context(), itemsMap, failOn999)
 
 	if len(errs) == 0 {
 		t.Fatal("expected at least one error, got none")
@@ -179,7 +172,7 @@ func TestMapM_FuncReturnsError_CollectedInErrors(t *testing.T) {
 func TestMap_CtxAlreadyCancelled_DoesNotHang(t *testing.T) {
 	t.Parallel()
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel() // cancel BEFORE calling Map
 
 	items := []int{1, 2, 3}
@@ -189,7 +182,7 @@ func TestMap_CtxAlreadyCancelled_DoesNotHang(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		Map(ctx, items, noop)
+		_, _ = Map(ctx, items, noop)
 		close(done)
 	}()
 
@@ -204,7 +197,7 @@ func TestMap_CtxAlreadyCancelled_DoesNotHang(t *testing.T) {
 func TestMapM_CtxAlreadyCancelled_DoesNotHang(t *testing.T) {
 	t.Parallel()
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
 	itemsMap := map[string]int{"a": 1, "b": 2}
@@ -214,7 +207,7 @@ func TestMapM_CtxAlreadyCancelled_DoesNotHang(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		MapM(ctx, itemsMap, noop)
+		_, _ = MapM(ctx, itemsMap, noop)
 		close(done)
 	}()
 
@@ -238,7 +231,7 @@ func TestMap_StuckChild_CtxFires_ReturnsWithinBound(t *testing.T) {
 
 	stuck := stuckMapFn(release)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
 	defer cancel()
 
 	items := []int{1}
@@ -293,7 +286,7 @@ func TestMapM_StuckChild_CtxFires_ReturnsWithinBound(t *testing.T) {
 
 	stuck := stuckMapMFn(release)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
 	defer cancel()
 
 	itemsMap := map[string]int{"a": 1}
@@ -347,14 +340,14 @@ func TestMap_AllChildrenHonorCtx_CtxFires_NoHang(t *testing.T) {
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 	defer cancel()
 
 	items := []int{1, 2, 3, 4, 5}
 
 	done := make(chan struct{})
 	go func() {
-		Map(ctx, items, honor)
+		_, _ = Map(ctx, items, honor)
 		close(done)
 	}()
 
@@ -374,7 +367,7 @@ func TestMap_EmptyItems_ReturnsEmpty(t *testing.T) {
 
 	noop := func(_ context.Context, v int) (int, error) { return v, nil }
 
-	results, errs := Map(context.Background(), []int{}, noop)
+	results, errs := Map(t.Context(), []int{}, noop)
 
 	if len(errs) != 0 {
 		t.Errorf("expected no errors on empty input, got %v", errs)
@@ -389,7 +382,7 @@ func TestMapM_EmptyItems_ReturnsEmpty(t *testing.T) {
 
 	noop := func(_ context.Context, _ string, v int) (int, error) { return v, nil }
 
-	results, errs := MapM(context.Background(), map[string]int{}, noop)
+	results, errs := MapM(t.Context(), map[string]int{}, noop)
 
 	if len(errs) != 0 {
 		t.Errorf("expected no errors on empty input, got %v", errs)
@@ -417,7 +410,7 @@ func TestMap_NoGoroutineLeakFromHelper(t *testing.T) {
 
 	// Warm up the runtime once so the first call doesn't skew the
 	// baseline (e.g. lazy initialization of internal pools).
-	_, _ = Map(context.Background(), []int{1}, func(_ context.Context, v int) (int, error) {
+	_, _ = Map(t.Context(), []int{1}, func(_ context.Context, v int) (int, error) {
 		return v, nil
 	})
 
@@ -430,8 +423,8 @@ func TestMap_NoGoroutineLeakFromHelper(t *testing.T) {
 
 	// Run many Maps that succeed cleanly — the helper goroutine in
 	// each must exit, leaving no residue.
-	for i := 0; i < 50; i++ {
-		_, _ = Map(context.Background(), []int{1, 2, 3}, func(_ context.Context, v int) (int, error) {
+	for range 50 {
+		_, _ = Map(t.Context(), []int{1, 2, 3}, func(_ context.Context, v int) (int, error) {
 			return v, nil
 		})
 	}
