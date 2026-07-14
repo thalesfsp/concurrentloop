@@ -100,7 +100,7 @@ func RemoveZeroValues[T any](removeZeroValues bool, results []T) []T {
 // Map processes each element in a slice concurrently using the provided function.
 // Returns a slice of results and any errors that occurred during processing.
 //
-//nolint:funlen,gomnd,gocognit,mnd
+//nolint:gomnd,gocognit,mnd
 func Map[T any, Result any](
 	ctx context.Context,
 	items []T,
@@ -219,77 +219,7 @@ indexLoop:
 			defer sem.Release(1)
 			defer wg.Done()
 
-			select {
-			case <-ctx.Done():
-				// Context canceled, exit early.
-				return
-			default:
-				// Proceed with processing.
-			}
-
-			mapLogger.Tracelnf("go routine %d started", index)
-
-			res, err := f(ctx, items[index])
-			if err != nil {
-				errMutex.Lock()
-				defer errMutex.Unlock()
-
-				errs = append(errs, customerror.New(
-					fmt.Sprintf("failed mapping, on item %+v", items[index]),
-					customerror.WithError(err),
-					customerror.WithTag(Name),
-				))
-
-				return
-			}
-
-			// Check if result i exists.
-			if len(results) <= index {
-				errMutex.Lock()
-				defer errMutex.Unlock()
-
-				errs = append(errs, customerror.New(
-					fmt.Sprintf("failed mapping, on item %+v", items[index]),
-					customerror.WithError(fmt.Errorf("result index %v out of range", index)),
-					customerror.WithTag(Name),
-				))
-
-				return
-			}
-
-			// Check limit.
-			if o.Limit > 0 {
-				if atomic.LoadUint64(&resultTracker) > uint64(o.Limit) {
-					return
-				}
-			}
-
-			resMutex.Lock()
-			results[index] = res
-
-			// Write to writer if specified.
-			if o.Writer != nil {
-				if resBytes, err := json.Marshal(res); err == nil {
-					if _, writeErr := o.Writer.Write(append(resBytes, '\n')); writeErr != nil {
-						errMutex.Lock()
-
-						errs = append(errs, customerror.New(
-							"failed to write result to writer",
-							customerror.WithError(writeErr),
-							customerror.WithTag(Name),
-						))
-
-						errMutex.Unlock()
-						resMutex.Unlock()
-
-						return
-					}
-				}
-			}
-
-			resMutex.Unlock()
-
-			atomic.AddUint64(&resultTracker, 1)
+			mapWorker(ctx, index, items, f, o, results, &errs, &errMutex, &resMutex, &resultTracker)
 		}(index)
 	}
 
@@ -346,6 +276,98 @@ indexLoop:
 	return RemoveZeroValues(o.RemoveZeroValues, results), nil
 }
 
+// mapWorker runs the body of a single Map goroutine: it invokes f on
+// items[index] and records the result (indexed write) or error under the
+// appropriate mutex. Extracted verbatim from Map's per-item closure so the
+// hot path stays within the gocyclo/maintidx budget without altering
+// behaviour — sem.Release and wg.Done stay deferred in the launching
+// closure. Mutexes and the shared errs/resultTracker are passed by
+// pointer (never copy a sync.Mutex); results is the pre-allocated slice
+// whose backing array is written in place.
+func mapWorker[T any, Result any](
+	ctx context.Context,
+	index int,
+	items []T,
+	f MapFunc[T, Result],
+	o Option,
+	results []Result,
+	errs *[]error,
+	errMutex *sync.Mutex,
+	resMutex *sync.Mutex,
+	resultTracker *uint64,
+) {
+	select {
+	case <-ctx.Done():
+		// Context canceled, exit early.
+		return
+	default:
+	}
+
+	mapLogger.Tracelnf("go routine %d started", index)
+
+	res, err := f(ctx, items[index])
+	if err != nil {
+		errMutex.Lock()
+		defer errMutex.Unlock()
+
+		*errs = append(*errs, customerror.New(
+			fmt.Sprintf("failed mapping, on item %+v", items[index]),
+			customerror.WithError(err),
+			customerror.WithTag(Name),
+		))
+
+		return
+	}
+
+	// Check if result i exists.
+	if len(results) <= index {
+		errMutex.Lock()
+		defer errMutex.Unlock()
+
+		*errs = append(*errs, customerror.New(
+			fmt.Sprintf("failed mapping, on item %+v", items[index]),
+			customerror.WithError(fmt.Errorf("result index %v out of range", index)),
+			customerror.WithTag(Name),
+		))
+
+		return
+	}
+
+	// Check limit.
+	if o.Limit > 0 {
+		if atomic.LoadUint64(resultTracker) > uint64(o.Limit) {
+			return
+		}
+	}
+
+	resMutex.Lock()
+	results[index] = res
+
+	// Write to writer if specified.
+	if o.Writer != nil {
+		if resBytes, err := json.Marshal(res); err == nil {
+			if _, writeErr := o.Writer.Write(append(resBytes, '\n')); writeErr != nil {
+				errMutex.Lock()
+
+				*errs = append(*errs, customerror.New(
+					"failed to write result to writer",
+					customerror.WithError(writeErr),
+					customerror.WithTag(Name),
+				))
+
+				errMutex.Unlock()
+				resMutex.Unlock()
+
+				return
+			}
+		}
+	}
+
+	resMutex.Unlock()
+
+	atomic.AddUint64(resultTracker, 1)
+}
+
 // waitForWaitGroupOrCtx blocks until either wg.Wait() returns OR ctx fires
 // Done(). Returns ctx.Err() if ctx fired first, nil if all workers finished.
 //
@@ -377,7 +399,7 @@ func waitForWaitGroupOrCtx(ctx context.Context, wg *sync.WaitGroup) error {
 // MapM processes each key-value pair in a map concurrently using the provided function.
 // Returns a slice of results and any errors that occurred during processing.
 //
-//nolint:funlen,gomnd,gocognit,mnd
+//nolint:gomnd,gocognit,mnd
 func MapM[T any, Result any](
 	ctx context.Context,
 	itemsMap map[string]T,
@@ -503,63 +525,7 @@ keyLoop:
 			defer sem.Release(1)
 			defer wg.Done()
 
-			select {
-			case <-ctx.Done():
-				// Context canceled, exit early
-				return
-			default:
-				// Proceed with processing
-			}
-
-			mapLogger.Tracelnf("go routine started, key %s", k)
-
-			res, err := f(ctx, k, it)
-			if err != nil {
-				errMutex.Lock()
-				defer errMutex.Unlock()
-
-				errs = append(errs, customerror.New(
-					fmt.Sprintf("failed mapping, key %+v", k),
-					customerror.WithTag(Name),
-					customerror.WithError(err),
-				))
-
-				return
-			}
-
-			// Check limit.
-			if o.Limit > 0 {
-				if atomic.LoadUint64(&resultTracker) > uint64(o.Limit) {
-					return
-				}
-			}
-
-			resMutex.Lock()
-			results = append(results, res)
-
-			// Write to writer if specified.
-			if o.Writer != nil {
-				if resBytes, err := json.Marshal(res); err == nil {
-					if _, writeErr := o.Writer.Write(append(resBytes, '\n')); writeErr != nil {
-						errMutex.Lock()
-
-						errs = append(errs, customerror.New(
-							"failed to write result to writer",
-							customerror.WithError(writeErr),
-							customerror.WithTag(Name),
-						))
-
-						errMutex.Unlock()
-						resMutex.Unlock()
-
-						return
-					}
-				}
-			}
-
-			resMutex.Unlock()
-
-			atomic.AddUint64(&resultTracker, 1)
+			mapMWorker(ctx, k, it, f, o, &results, &errs, &errMutex, &resMutex, &resultTracker)
 		}(key, item)
 	}
 
@@ -618,6 +584,83 @@ keyLoop:
 	}
 
 	return RemoveZeroValues(o.RemoveZeroValues, results), nil
+}
+
+// mapMWorker runs the body of a single MapM goroutine: it invokes f on the
+// key/item pair and records the result (appended) or error under the
+// appropriate mutex. Extracted verbatim from MapM's per-key closure so the
+// hot path stays within the gocyclo/maintidx budget without altering
+// behaviour — sem.Release and wg.Done stay deferred in the launching
+// closure. Mutexes, errs, resultTracker and the appended results slice are
+// passed by pointer (never copy a sync.Mutex; results grows via append).
+func mapMWorker[T any, Result any](
+	ctx context.Context,
+	key string,
+	item T,
+	f MapMFunc[T, Result],
+	o Option,
+	results *[]Result,
+	errs *[]error,
+	errMutex *sync.Mutex,
+	resMutex *sync.Mutex,
+	resultTracker *uint64,
+) {
+	select {
+	case <-ctx.Done():
+		// Context canceled, exit early
+		return
+	default:
+	}
+
+	mapLogger.Tracelnf("go routine started, key %s", key)
+
+	res, err := f(ctx, key, item)
+	if err != nil {
+		errMutex.Lock()
+		defer errMutex.Unlock()
+
+		*errs = append(*errs, customerror.New(
+			fmt.Sprintf("failed mapping, key %+v", key),
+			customerror.WithTag(Name),
+			customerror.WithError(err),
+		))
+
+		return
+	}
+
+	// Check limit.
+	if o.Limit > 0 {
+		if atomic.LoadUint64(resultTracker) > uint64(o.Limit) {
+			return
+		}
+	}
+
+	resMutex.Lock()
+	*results = append(*results, res)
+
+	// Write to writer if specified.
+	if o.Writer != nil {
+		if resBytes, err := json.Marshal(res); err == nil {
+			if _, writeErr := o.Writer.Write(append(resBytes, '\n')); writeErr != nil {
+				errMutex.Lock()
+
+				*errs = append(*errs, customerror.New(
+					"failed to write result to writer",
+					customerror.WithError(writeErr),
+					customerror.WithTag(Name),
+				))
+
+				errMutex.Unlock()
+				resMutex.Unlock()
+
+				return
+			}
+		}
+	}
+
+	resMutex.Unlock()
+
+	atomic.AddUint64(resultTracker, 1)
 }
 
 // MapDone processes each element in a slice concurrently with early termination support.
