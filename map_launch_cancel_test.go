@@ -320,12 +320,14 @@ func TestMapDone_LaunchCancellationCollectsErrors(t *testing.T) {
 	controlled.cancel = cancel
 	controlled.doneAt = 9
 
-	_, errs := MapDone(controlled, []int{1, 2, 3, 4, 5}, func(ctx context.Context, _ int, _ chan<- struct{}) (int, error) {
+	items := []int{1, 2, 3, 4, 5}
+
+	_, errs := MapDone(controlled, items, func(ctx context.Context, _ int, _ chan<- struct{}) (int, error) {
 		once.Do(func() { close(started) })
 		<-ctx.Done()
 
 		return 0, errors.New("worker cancellation")
-	})
+	}, WithBatchSize(len(items)))
 	if len(errs) == 0 {
 		t.Fatal("missing cancellation error")
 	}
