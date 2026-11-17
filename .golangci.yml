@@ -1,88 +1,93 @@
 # Copyright 2022 The concurrentloop Authors. All rights reserved.
-# Use of this source code is governed by a MIT
-# license that can be found in the LICENSE file.
+# Use of this source code is governed by a MIT license in the LICENSE file.
 
----
-
+version: "2"
 run:
   timeout: 1m
-  skip-files:
-    - internal/*
-
 linters:
-  enable-all: true
+  default: all
   disable:
-    - wrapcheck
-    - testpackage
-    - gochecknoglobals
-    - exhaustivestruct
-    - exhaustruct
-    - paralleltest
-    - godox
     - cyclop
-    - tagliatelle
-    - goerr113
-    - forcetypeassert
-    - ireturn
-    - varnamelen
-    - interfacebloat
-    - testifylint
     - depguard
+    - err113
     - exhaustive
-  fast: false
-
-# Settings for specific linters
-linters-settings:
-  funlen:
-    lines: 150
-    statements: 45
-
-issues:
-  exclude-rules:
-    - path: cmd/
-      linters:
-        - gochecknoinits
-        - gomnd
-        - forbidigo
-
-    - path: message/util.go
-      linters:
-        - gosec
-
-    - path: example_test.go
-      linters:
-        - lll
-
-    - path: internal/http/
-      linters:
-        - unparam
-        - nlreturn
-
-    - path: _test\.go
-      linters:
-        - scopelint
-        - wsl
-        - nlreturn
-        - funlen
-        - dupl
-
-    - path: doc.go
-      linters:
-        - lll
-
-    - path: example_test.go
-      linters:
-        - nosnakecase
-
-    - text: "O_WRONLY|O_RDWR|O_CREATE|O_TRUNC|O_APPEND"
-      linters:
-        - nosnakecase
-
-    - linters:
-        - lll
-      source: "json:"
-
-    - linters:
-        - gocritic
-        - godot
-      source: "//////"
+    - exhaustruct
+    - forcetypeassert
+    - gochecknoglobals
+    - godox
+    - interfacebloat
+    - ireturn
+    - paralleltest
+    - tagliatelle
+    - testifylint
+    - testpackage
+    - varnamelen
+    - wrapcheck
+  settings:
+    funlen:
+      lines: 150
+      statements: 45
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - forbidigo
+          - gochecknoinits
+          - mnd
+        path: cmd/
+      - linters:
+          - gosec
+        path: message/util.go
+      - linters:
+          - lll
+        path: example_test.go
+      - linters:
+          - nlreturn
+          - unparam
+        path: internal/http/
+      - linters:
+          - dupl
+          - funlen
+          - nlreturn
+          - scopelint
+          - wsl
+        path: _test\.go
+      - linters:
+          - lll
+        path: doc.go
+      - linters:
+          - nosnakecase
+        path: example_test.go
+      - linters:
+          - nosnakecase
+        text: O_WRONLY|O_RDWR|O_CREATE|O_TRUNC|O_APPEND
+      - linters:
+          - lll
+        source: 'json:'
+      - linters:
+          - gocritic
+          - godot
+        source: //////
+    paths:
+      - internal/*
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
+    - gci
+    - gofmt
+    - gofumpt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - internal/*
+      - third_party$
+      - builtin$
+      - examples$

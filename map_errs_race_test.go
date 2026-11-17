@@ -3,11 +3,16 @@
 // license that can be found in the LICENSE file.
 //
 //nolint:exhaustruct
+
 package concurrentloop
 
 import (
 	"context"
 	"errors"
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"strings"
 	"sync"
@@ -44,9 +49,8 @@ import (
 //   - Map line 318    (post-waitForWaitGroupOrCtx err — Grok flagged)
 //   - MapM line 560   (mirror of Map line 318)
 //
-// Lines 199 and 209 ALSO have an independent orphan-goroutine issue
-// (return without wg.Wait) — out of scope for v1.4.4. This file's
-// tests focus exclusively on the errs-snapshot asymmetry.
+// Launch-loop exits are now covered by map_launch_cancel_test.go as well as
+// the structural guard below; they must reach the common snapshot path.
 //
 // Fix: snapshot errs under errMutex on every early-return path that
 // can race with concurrent writers, exactly like results is already
@@ -68,6 +72,7 @@ func TestMapM_LateWorker_ErrsSliceRaceFree(t *testing.T) {
 	t.Parallel()
 
 	const concurrency = 8
+
 	itemsMap := make(map[string]int, concurrency)
 	for i := range concurrency {
 		itemsMap[string(rune('a'+i))] = i
@@ -77,6 +82,7 @@ func TestMapM_LateWorker_ErrsSliceRaceFree(t *testing.T) {
 	// has already returned via the ctx-fire path.
 	workerStarted := make(chan struct{}, concurrency)
 	releaseWorkers := make(chan struct{})
+
 	var slowWorkerCompleted atomic.Bool
 
 	mapper := func(ctx context.Context, key string, _ int) (string, error) {
@@ -94,6 +100,7 @@ func TestMapM_LateWorker_ErrsSliceRaceFree(t *testing.T) {
 			// Don't return here; we want the late-error path.
 			<-releaseWorkers
 			slowWorkerCompleted.Store(true)
+
 			return key, errors.New("late worker error after ctx: " + key)
 		}
 	}
@@ -144,6 +151,7 @@ func TestMapM_LateWorker_ErrsSliceRaceFree(t *testing.T) {
 	// observe the conflict if it exists.
 	for range 10000 {
 		_ = len(got.errs)
+
 		_ = cap(got.errs)
 		if len(got.errs) > 0 {
 			_ = got.errs[0]
@@ -154,13 +162,16 @@ func TestMapM_LateWorker_ErrsSliceRaceFree(t *testing.T) {
 	if len(got.errs) == 0 {
 		t.Fatal("expected at least the ctx error in errs slice")
 	}
+
 	foundCtxErr := false
+
 	for _, e := range got.errs {
 		if e != nil && (errors.Is(e, context.Canceled) || strings.Contains(e.Error(), "context canceled")) {
 			foundCtxErr = true
 			break
 		}
 	}
+
 	if !foundCtxErr {
 		t.Fatalf("expected ctx-cancel error in errs, got: %v", got.errs)
 	}
@@ -173,6 +184,7 @@ func TestMap_LateWorker_ErrsSliceRaceFree(t *testing.T) {
 	t.Parallel()
 
 	const concurrency = 8
+
 	items := make([]int, concurrency)
 	for i := range items {
 		items[i] = i
@@ -183,12 +195,13 @@ func TestMap_LateWorker_ErrsSliceRaceFree(t *testing.T) {
 
 	mapper := func(ctx context.Context, val int) (string, error) {
 		workerStarted <- struct{}{}
+
 		select {
 		case <-releaseWorkers:
-			return string(rune('a' + val)), errors.New("late worker error")
+			return fmt.Sprintf("item-%d", val), errors.New("late worker error")
 		case <-ctx.Done():
 			<-releaseWorkers
-			return string(rune('a' + val)), errors.New("late worker error after ctx")
+			return fmt.Sprintf("item-%d", val), errors.New("late worker error after ctx")
 		}
 	}
 
@@ -222,6 +235,7 @@ func TestMap_LateWorker_ErrsSliceRaceFree(t *testing.T) {
 
 	for range 10000 {
 		_ = len(got.errs)
+
 		_ = cap(got.errs)
 		if len(got.errs) > 0 {
 			_ = got.errs[0]
@@ -280,6 +294,7 @@ func TestMapM_KeyLoopCtxErr_DoesNotSelfDeadlock(t *testing.T) {
 	// Bound the entire test on 5s — pre-fix deadlock manifests as an
 	// indefinite hang; we want a clean t.Fatalf under timeout.
 	done := make(chan struct{})
+
 	go func() {
 		// Inject a 50ms randomness sleep per iteration. This widens
 		// the window between top-select-default and the second
@@ -287,6 +302,7 @@ func TestMapM_KeyLoopCtxErr_DoesNotSelfDeadlock(t *testing.T) {
 		_, _ = MapM(ctx, itemsMap, mapper,
 			WithRandomDelayTime(1, 2, 50*time.Millisecond),
 		)
+
 		close(done)
 	}()
 
@@ -337,15 +353,16 @@ func TestKeyLoopMutexDiscipline_StructuralAudit(t *testing.T) {
 	// the next 6 lines; if a `break <label>` appears before any
 	// `return` or end-of-block, the site is dangerous.
 	lines := strings.Split(src, "\n")
+
 	var offending []string
+
 	for i, line := range lines {
 		if !strings.Contains(line, "defer errMutex.Unlock()") {
 			continue
 		}
-		end := i + 7
-		if end > len(lines) {
-			end = len(lines)
-		}
+
+		end := min(i+7, len(lines))
+
 		for j := i + 1; j < end; j++ {
 			next := lines[j]
 			// `return` first → safe pattern; stop scanning this site.
@@ -358,21 +375,19 @@ func TestKeyLoopMutexDiscipline_StructuralAudit(t *testing.T) {
 			// labeled breaks are the dangerous shape. Match `break <ident>`.
 			trimmed := strings.TrimSpace(next)
 			if strings.HasPrefix(trimmed, "break ") && trimmed != "break" {
-				start := i - 2
-				if start < 0 {
-					start = 0
-				}
-				ctxEnd := j + 1
-				if ctxEnd > len(lines) {
-					ctxEnd = len(lines)
-				}
+				start := max(i-2, 0)
+
+				ctxEnd := min(j+1, len(lines))
+
 				offending = append(offending,
 					"map.go:"+itoa(i+1)+" (defer) → map.go:"+itoa(j+1)+" (break):\n"+
 						strings.Join(lines[start:ctxEnd], "\n"))
+
 				break
 			}
 		}
 	}
+
 	if len(offending) > 0 {
 		t.Fatalf("v1.4.4 deadlock-pattern reintroduced: %d site(s) of "+
 			"`defer errMutex.Unlock()` followed by `break <label>` found in "+
@@ -393,86 +408,67 @@ func itoa(n int) string {
 	if n == 0 {
 		return "0"
 	}
+
 	var buf [20]byte
+
 	i := len(buf)
 	for n > 0 {
 		i--
 		buf[i] = byte('0' + n%10)
 		n /= 10
 	}
+
 	return string(buf[i:])
 }
 
-// TestEarlyReturnSnapshotInvariant_StructuralAudit is a structural
-// guard: scans map.go and asserts that EVERY early-return path which
-// can race with concurrent workers snapshots BOTH `results` AND
-// `errs` under their respective mutexes before returning.
-//
-// Why structural: a behavioural test catches the race when it fires
-// (probabilistic under -race); a structural scan catches the
-// asymmetric pattern at PR review time. The pattern that v1.4.3
-// missed was visible in the source: snapshot results, return errs
-// directly. This test makes that asymmetry impossible to reintroduce.
-//
-// The check looks for the `return ..., errs` pattern in early-return
-// paths and asserts a `make([]error, len(errs))` snapshot was built
-// in the SAME basic block. False positives (legitimate happy-path
-// returns where wg.Wait completed and no concurrent writers exist)
-// are allow-listed below.
+// TestEarlyReturnSnapshotInvariant_StructuralAudit keeps the existing snapshot
+// guard and checks launch-loop returns structurally. Counting snapshot markers
+// alone missed the unsafe exits before the wait/snapshot block.
 func TestEarlyReturnSnapshotInvariant_StructuralAudit(t *testing.T) {
 	src := readMapSourceForInvariantTest(t)
+	if strings.Count(src, "errsSnapshot := make([]error, len(errs))") < 2 {
+		t.Fatal("Map and MapM must retain their locked error snapshots")
+	}
 
-	// The 4 early-return sites that MUST snapshot errs:
-	//   Map:199, Map:209, Map:318, MapM:560
-	//
-	// Pattern: a return statement of the shape `return ..., errs`
-	// preceded by an errMutex.Lock + append + errMutex.Unlock without
-	// a `make([]error, len(errs))` + `copy(...)` snapshot.
-	//
-	// We don't have a Go AST scanner here (would over-engineer for the
-	// scope), so we use string matching on canonical patterns. The
-	// test fails if any racy-return pattern reappears. Update the
-	// allow-list when you intentionally return errs without snapshot
-	// (e.g. happy path post-wg.Wait where no writers remain).
+	file, err := parser.ParseFile(token.NewFileSet(), "map.go", src, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	// Forbidden patterns: an errMutex.Lock+append+Unlock followed by a
-	// `return ..., errs` without an interposing snapshot of errs.
-	// We test by checking each early-return path's surrounding context
-	// for the snapshot pattern.
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || (fn.Name.Name != "Map" && fn.Name.Name != "MapDone") {
+			continue
+		}
 
-	// The contract is enforced via two checks:
-	//
-	//   1. Every appearance of `return ..., errs` (returning the live
-	//      slice) must be in a context where wg.Wait has completed.
-	//   2. Every early-return path (where wg.Wait has NOT completed)
-	//      must construct a snapshot via `make([]error, len(...))` +
-	//      `copy(...)` before returning.
+		ast.Inspect(fn.Body, func(node ast.Node) bool {
+			loop, ok := node.(*ast.RangeStmt)
+			if !ok {
+				return true
+			}
 
-	// Forbidden marker: `return RemoveZeroValues(...), errs` appearing
-	// AFTER a `waitForWaitGroupOrCtx(...) err` block but WITHOUT an
-	// errs-snapshot in between.
-	//
-	// Post-fix the v1.4.3 sites must show:
-	//   errsSnapshot := make([]error, len(errs))
-	//   copy(errsSnapshot, errs)
-	// in the early-return path.
+			ast.Inspect(loop.Body, func(node ast.Node) bool {
+				ret, ok := node.(*ast.ReturnStmt)
+				if !ok {
+					return true
+				}
 
-	earlyReturnSnapshotMarker := "errsSnapshot := make([]error, len(errs))"
+				for _, result := range ret.Results {
+					ast.Inspect(result, func(node ast.Node) bool {
+						ident, ok := node.(*ast.Ident)
+						if ok && (ident.Name == "results" || ident.Name == "errs") {
+							t.Errorf("%s returns live %s from its launch loop", fn.Name.Name, ident.Name)
+						}
 
-	// Count snapshot occurrences. We expect at least 2 (Map:318 + MapM:560).
-	// The pre-wg.Wait sites (Map:199, Map:209) are out-of-scope for
-	// v1.4.4 (they have an independent orphan-goroutine bug requiring
-	// a bigger refactor) — but I will fix them in a follow-up. For
-	// now, this invariant test asserts the post-wg.Wait sites.
-	count := strings.Count(src, earlyReturnSnapshotMarker)
-	if count < 2 {
-		t.Fatalf("v1.4.4 snapshot-symmetry invariant violated: expected at "+
-			"least 2 occurrences of %q (one in Map's post-wait early-return, "+
-			"one in MapM's), found %d. The early-return path returns errs to "+
-			"the caller without a snapshot — late workers can append to errs "+
-			"after the return, racing with the caller's slice read. Apply the "+
-			"same snapshot pattern that wraps `results`.",
-			earlyReturnSnapshotMarker, count)
+						return true
+					})
+				}
+
+				return true
+			})
+
+			return false
+		})
 	}
 }
 
@@ -494,10 +490,13 @@ func readMapSourceForInvariantTest(t *testing.T) string {
 			errMapSrc = err
 			return
 		}
+
 		mapSrcCache = string(b)
 	})
+
 	if errMapSrc != nil {
 		t.Fatalf("read map.go: %v", errMapSrc)
 	}
+
 	return mapSrcCache
 }

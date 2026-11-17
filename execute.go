@@ -53,22 +53,20 @@ func Execute[T any](ctx context.Context, fns []ExecuteFunc[T]) ([]T, Errors) {
 //
 // NOTE: It's the caller's responsibility to close the channel.
 //
-//nolint:copyloopvar
+
 func ExecuteCh[T any](ctx context.Context, fns []ExecuteFunc[T]) chan ResultCh[T] {
 	resultsCh := make(chan ResultCh[T])
 
 	for _, fn := range fns {
-		fn := fn
-
 		go func(fn ExecuteFunc[T]) {
 			result, err := fn(ctx)
 			if err != nil {
-				resultsCh <- ResultCh[T]{Output: result, Error: err}
+				resultsCh <- ResultCh[T]{Output: result, Error: err, Index: 0}
 
 				return
 			}
 
-			resultsCh <- ResultCh[T]{Output: result, Error: nil}
+			resultsCh <- ResultCh[T]{Output: result, Error: nil, Index: 0}
 		}(fn)
 	}
 
