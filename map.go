@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"reflect"
 	"runtime"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -59,7 +60,7 @@ type MapMFuncCh[T any, Result any] func(
 //////
 
 // isZeroOfUnderlyingType checks if the value is the zero value.
-func isZeroOfUnderlyingType(x interface{}) bool {
+func isZeroOfUnderlyingType(x any) bool {
 	if x == nil {
 		return true
 	}
@@ -68,7 +69,7 @@ func isZeroOfUnderlyingType(x interface{}) bool {
 
 	// Handle special cases.
 	switch v.Kind() {
-	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
 		if v.IsNil() {
 			return true
 		}
@@ -97,6 +98,20 @@ func RemoveZeroValues[T any](removeZeroValues bool, results []T) []T {
 	return filtered
 }
 
+func mapOptions(opts []Func) Option {
+	var o Option
+
+	o.BatchSize = runtime.NumCPU()
+
+	o.RemoveZeroValues = true
+
+	for _, opt := range opts {
+		o = opt(o)
+	}
+
+	return o
+}
+
 // Map processes each element in a slice concurrently using the provided function.
 // Returns a slice of results and any errors that occurred during processing.
 //
@@ -120,14 +135,7 @@ func Map[T any, Result any](
 		return []Result{}, nil
 	}
 
-	o := Option{
-		BatchSize:        runtime.NumCPU(),
-		RemoveZeroValues: true,
-	}
-
-	for _, opt := range opts {
-		o = opt(o)
-	}
+	o := mapOptions(opts)
 
 	sem := semaphore.NewWeighted(int64(o.BatchSize))
 
@@ -147,8 +155,7 @@ func Map[T any, Result any](
 	var rdmn *randomness.Randomness
 
 	if o.RandomDelayTimeMin != 0 || o.RandomDelayTimeMax != 0 &&
-		o.RandomDelayTimeMin < o.RandomDelayTimeMax &&
-		o.RandomDelayTimeDuration != 0 {
+		o.RandomDelayTimeMin < o.RandomDelayTimeMax && o.RandomDelayTimeDuration != 0 {
 		r, err := randomness.New(o.RandomDelayTimeMin, o.RandomDelayTimeMax, 3, false)
 		if err != nil {
 			return nil, []error{err}
@@ -191,22 +198,22 @@ indexLoop:
 		// Context error handling.
 		if ctx.Err() != nil {
 			errMutex.Lock()
-			defer errMutex.Unlock()
 
 			errs = append(errs, customerror.New(fmt.Sprintf(`context errored before mapping "%+v"`, items[index])))
+			errMutex.Unlock()
 
-			// When returning results, use the fixed RemoveZeroValues
-			return RemoveZeroValues(o.RemoveZeroValues, results), errs
+			break indexLoop
 		}
 
 		// Semaphore handling.
-		if err := sem.Acquire(ctx, 1); err != nil {
+		err := sem.Acquire(ctx, 1)
+		if err != nil {
 			errMutex.Lock()
-			defer errMutex.Unlock()
 
 			errs = append(errs, customerror.New(fmt.Sprintf(`context timeout before mapping "%+v"`, items[index])))
+			errMutex.Unlock()
 
-			return RemoveZeroValues(o.RemoveZeroValues, results), errs
+			break indexLoop
 		}
 
 		//////
@@ -231,7 +238,8 @@ indexLoop:
 	// past ctx.Err(). The 2026-05-01 proj-ringboost-vendor v195→v196
 	// rotation hung for 2+ hours via this exact path. Regression test:
 	// TestMap_StuckChild_CtxFires_ReturnsWithinBound.
-	if err := waitForWaitGroupOrCtx(ctx, wg); err != nil {
+	err := waitForWaitGroupOrCtx(ctx, wg)
+	if err != nil {
 		// Snapshot results AND errs under their respective mutexes so
 		// a late-acquiring worker (still running because waitForWait
 		// GroupOrCtx returned via the ctx branch, not the wg branch)
@@ -254,6 +262,7 @@ indexLoop:
 		resMutex.Unlock()
 
 		errMutex.Lock()
+
 		errs = append([]error{err}, errs...)
 		errsSnapshot := make([]error, len(errs))
 		copy(errsSnapshot, errs)
@@ -265,6 +274,7 @@ indexLoop:
 	// Check if context was canceled and prioritize its error.
 	if ctx.Err() != nil {
 		errMutex.Lock()
+
 		errs = append([]error{ctx.Err()}, errs...)
 		errMutex.Unlock()
 	}
@@ -345,8 +355,10 @@ func mapWorker[T any, Result any](
 
 	// Write to writer if specified.
 	if o.Writer != nil {
-		if resBytes, err := json.Marshal(res); err == nil {
-			if _, writeErr := o.Writer.Write(append(resBytes, '\n')); writeErr != nil {
+		resBytes, err := json.Marshal(res)
+		if err == nil {
+			_, writeErr := o.Writer.Write(append(resBytes, '\n'))
+			if writeErr != nil {
 				errMutex.Lock()
 
 				*errs = append(*errs, customerror.New(
@@ -368,8 +380,8 @@ func mapWorker[T any, Result any](
 	atomic.AddUint64(resultTracker, 1)
 }
 
-// waitForWaitGroupOrCtx blocks until either wg.Wait() returns OR ctx fires
-// Done(). Returns ctx.Err() if ctx fired first, nil if all workers finished.
+// waitForWaitGroupOrCtx blocks until wg.Wait returns or ctx is canceled.
+// Returns ctx.Err() for cancellation, otherwise nil.
 //
 // This is the safety net that ensures Map/MapM cannot hang indefinitely
 // when a worker goroutine fails to call wg.Done() — for example because
@@ -383,6 +395,7 @@ func mapWorker[T any, Result any](
 // see TestMap_NoGoroutineLeakFromHelper for the regression guard.
 func waitForWaitGroupOrCtx(ctx context.Context, wg *sync.WaitGroup) error {
 	done := make(chan struct{})
+
 	go func() {
 		wg.Wait()
 		close(done)
@@ -419,14 +432,7 @@ func MapM[T any, Result any](
 		return []Result{}, nil
 	}
 
-	o := Option{
-		BatchSize:        runtime.NumCPU(),
-		RemoveZeroValues: true,
-	}
-
-	for _, opt := range opts {
-		o = opt(o)
-	}
+	o := mapOptions(opts)
 
 	sem := semaphore.NewWeighted(int64(o.BatchSize))
 
@@ -499,6 +505,7 @@ keyLoop:
 		// release explicitly.
 		if ctx.Err() != nil {
 			errMutex.Lock()
+
 			errs = append(errs, customerror.New(fmt.Sprintf(`context errored before mapping "%+v"`, key)))
 			errMutex.Unlock()
 
@@ -507,8 +514,10 @@ keyLoop:
 
 		// Semaphore handling. Same explicit-Unlock discipline as the
 		// ctx-err block above (v1.4.4 Grok-followup deadlock fix).
-		if err := sem.Acquire(ctx, 1); err != nil {
+		err := sem.Acquire(ctx, 1)
+		if err != nil {
 			errMutex.Lock()
+
 			errs = append(errs, customerror.New(fmt.Sprintf(`context timeout before mapping "%+v"`, key)))
 			errMutex.Unlock()
 
@@ -541,13 +550,15 @@ keyLoop:
 	// v1.4.3 only snapshotted results, leaving the errs slice header
 	// racy when a late-acquiring worker appends after the parent's
 	// errMutex.Unlock — caught by Grok 4.20 review on UVS v2.0.118.
-	if err := waitForWaitGroupOrCtx(ctx, wg); err != nil {
+	err := waitForWaitGroupOrCtx(ctx, wg)
+	if err != nil {
 		resMutex.Lock()
 		snapshot := make([]Result, len(results))
 		copy(snapshot, results)
 		resMutex.Unlock()
 
 		errMutex.Lock()
+
 		errs = append([]error{err}, errs...)
 		errsSnapshot := make([]error, len(errs))
 		copy(errsSnapshot, errs)
@@ -559,9 +570,13 @@ keyLoop:
 	// Write to writer as JSON array if specified.
 	if o.Writer != nil {
 		finalResults := RemoveZeroValues(o.RemoveZeroValues, results)
-		if resultsBytes, err := json.Marshal(finalResults); err == nil {
-			if _, writeErr := o.Writer.Write(resultsBytes); writeErr != nil {
+
+		resultsBytes, err := json.Marshal(finalResults)
+		if err == nil {
+			_, writeErr := o.Writer.Write(resultsBytes)
+			if writeErr != nil {
 				errMutex.Lock()
+
 				errs = append(errs, customerror.New(
 					"failed to write final results to writer",
 					customerror.WithError(writeErr),
@@ -575,15 +590,12 @@ keyLoop:
 	// Check if context was canceled and prioritize its error.
 	if ctx.Err() != nil {
 		errMutex.Lock()
+
 		errs = append([]error{ctx.Err()}, errs...)
 		errMutex.Unlock()
 	}
 
-	if len(errs) > 0 {
-		return RemoveZeroValues(o.RemoveZeroValues, results), errs
-	}
-
-	return RemoveZeroValues(o.RemoveZeroValues, results), nil
+	return RemoveZeroValues(o.RemoveZeroValues, results), errs
 }
 
 // mapMWorker runs the body of a single MapM goroutine: it invokes f on the
@@ -636,12 +648,15 @@ func mapMWorker[T any, Result any](
 	}
 
 	resMutex.Lock()
+
 	*results = append(*results, res)
 
 	// Write to writer if specified.
 	if o.Writer != nil {
-		if resBytes, err := json.Marshal(res); err == nil {
-			if _, writeErr := o.Writer.Write(append(resBytes, '\n')); writeErr != nil {
+		resBytes, err := json.Marshal(res)
+		if err == nil {
+			_, writeErr := o.Writer.Write(append(resBytes, '\n'))
+			if writeErr != nil {
 				errMutex.Lock()
 
 				*errs = append(*errs, customerror.New(
@@ -664,7 +679,8 @@ func mapMWorker[T any, Result any](
 }
 
 // MapDone processes each element in a slice concurrently with early termination support.
-// The processing function receives a done channel that can be used to signal early termination.
+// The processing function can send to or close done to request early termination.
+// The library snapshots its result/error slices before returning; callbacks may finish later.
 // Returns a slice of results and any errors that occurred during processing.
 //
 //nolint:gomnd,gocognit,mnd
@@ -688,38 +704,26 @@ func MapDone[T any, Result any](
 	}
 
 	// Initialize default options
-	o := Option{
-		BatchSize:        runtime.NumCPU(), // Default to number of CPU cores
-		RemoveZeroValues: true,             // Default to removing zero values from results
-	}
+	o := mapOptions(opts)
 
-	// Apply any provided option functions
-	for _, opt := range opts {
-		o = opt(o)
-	}
-
-	// Initialize concurrency control mechanisms
-	sem := semaphore.NewWeighted(int64(o.BatchSize)) // Semaphore to limit concurrent goroutines
-	wg := &sync.WaitGroup{}                          // WaitGroup to track completion of all goroutines
-	results := make([]Result, len(items))            // Pre-allocate results slice
+	// Channel slots let acquisition observe both cancellation and done.
+	slots := make(chan struct{}, max(0, o.BatchSize))
+	completed := make(chan struct{}, len(items))
+	launched := 0
+	results := make([]Result, len(items))
 
 	// Initialize error handling
 	var (
-		errs     []error    // Slice to store errors
-		errMutex sync.Mutex // Mutex to protect error slice access
-
-		resMutex sync.Mutex
-
-		resultTracker uint64 = 1 // Atomic counter for tracking processed results
+		errs               []error
+		errMutex, resMutex sync.Mutex
+		resultTracker      uint64 = 1
 	)
 
 	// Initialize randomness generator for delay if configured
 	var rdmn *randomness.Randomness
 
-	if o.RandomDelayTimeMin != 0 ||
-		o.RandomDelayTimeMax != 0 &&
-			o.RandomDelayTimeMin < o.RandomDelayTimeMax &&
-			o.RandomDelayTimeDuration != 0 {
+	if o.RandomDelayTimeMin != 0 || o.RandomDelayTimeMax != 0 &&
+		o.RandomDelayTimeMin < o.RandomDelayTimeMax && o.RandomDelayTimeDuration != 0 {
 		r, err := randomness.New(o.RandomDelayTimeMin, o.RandomDelayTimeMax, 3, false)
 		if err != nil {
 			return nil, []error{err}
@@ -730,22 +734,23 @@ func MapDone[T any, Result any](
 
 	// Channel to signal early termination
 	done := make(chan struct{})
+	stopped := false
 
 	// Process each item in the input slice
+doneLoop:
 	for index := range items {
 		select {
 		case <-done: // Check if processing should terminate early
-			resMutex.Lock()
-			defer resMutex.Unlock()
+			stopped = true
 
-			return RemoveZeroValues(o.RemoveZeroValues, results), errs
+			break doneLoop
 		case <-ctx.Done(): // Check if context has been cancelled
+			errMutex.Lock()
+
 			errs = append(errs, customerror.New(fmt.Sprintf(`context errored before mapping "%+v"`, items[index])))
+			errMutex.Unlock()
 
-			resMutex.Lock()
-			defer resMutex.Unlock()
-
-			return RemoveZeroValues(o.RemoveZeroValues, results), errs
+			break doneLoop
 		default:
 			// Apply random delay if configured
 			if rdmn != nil {
@@ -768,22 +773,28 @@ func MapDone[T any, Result any](
 				}
 			}
 
-			// Acquire semaphore slot (blocks if at capacity)
-			if err := sem.Acquire(ctx, 1); err != nil {
+			// A single done send also interrupts a full batch.
+			select {
+			case <-done:
+				stopped = true
+
+				break doneLoop
+			case <-ctx.Done():
+				errMutex.Lock()
+
 				errs = append(errs, customerror.New(fmt.Sprintf(`context timeout before mapping "%+v"`, items[index])))
+				errMutex.Unlock()
 
-				resMutex.Lock()
-				defer resMutex.Unlock()
-
-				return RemoveZeroValues(o.RemoveZeroValues, results), errs
+				break doneLoop
+			case slots <- struct{}{}:
 			}
 
-			wg.Add(1) // Register new goroutine
+			launched++
 
 			// Launch goroutine to process item
 			go func(index int) {
-				defer sem.Release(1) // Release semaphore slot when done
-				defer wg.Done()      // Mark goroutine as complete
+				defer func() { <-slots }()
+				defer func() { completed <- struct{}{} }()
 
 				mapLogger.Tracelnf("go routine %d started", index)
 
@@ -791,6 +802,7 @@ func MapDone[T any, Result any](
 				res, err := f(ctx, items[index], done)
 				if err != nil {
 					errMutex.Lock()
+
 					errs = append(errs, customerror.New(
 						fmt.Sprintf("failed mapping, on item %+v", items[index]),
 						customerror.WithError(err),
@@ -804,6 +816,7 @@ func MapDone[T any, Result any](
 				// Validate result index
 				if len(results) <= index {
 					errMutex.Lock()
+
 					errs = append(errs, customerror.New(
 						fmt.Sprintf("failed mapping, on item %+v", items[index]),
 						customerror.WithError(fmt.Errorf("result index %v out of range", index)),
@@ -831,21 +844,48 @@ func MapDone[T any, Result any](
 		}
 	}
 
-	// Wait for all goroutines to complete
-	wg.Wait()
-
-	// Return results and any errors
-	if len(errs) > 0 {
-		resMutex.Lock()
-		defer resMutex.Unlock()
-
-		return RemoveZeroValues(o.RemoveZeroValues, results), errs
+	// Cancellation and done must remain responsive even if a callback ignores
+	// them. Snapshot both slices: a late worker still owns the original state.
+	var err error
+	if !stopped {
+		err = waitForCompletions(ctx, completed, done, launched)
 	}
 
+	return snapshotMapDone(err, o.RemoveZeroValues, results, &errs, &resMutex, &errMutex)
+}
+
+// waitForCompletions does not spawn a waiter: late callbacks send into the
+// bounded completion buffer and can finish after cancellation or a done signal.
+func waitForCompletions(ctx context.Context, completed, done <-chan struct{}, pending int) error {
+	for pending > 0 {
+		select {
+		case <-completed:
+			pending--
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-done:
+			return nil
+		}
+	}
+
+	return nil
+}
+
+// snapshotMapDone copies state while late workers retain their original slices.
+func snapshotMapDone[T any](
+	err error, removeZero bool, results []T, errs *[]error, resMutex, errMutex *sync.Mutex,
+) ([]T, Errors) {
 	resMutex.Lock()
 	defer resMutex.Unlock()
 
-	return RemoveZeroValues(o.RemoveZeroValues, results), nil
+	errMutex.Lock()
+	defer errMutex.Unlock()
+
+	if err != nil {
+		*errs = append([]error{err}, (*errs)...)
+	}
+
+	return RemoveZeroValues(removeZero, slices.Clone(results)), slices.Clone(Errors(*errs))
 }
 
 // MapCh processes each key-value pair in a map concurrently with real-time result streaming.
@@ -880,14 +920,7 @@ func MapCh[T any, Result any](
 		return nil
 	}
 
-	o := Option{
-		BatchSize:        runtime.NumCPU(),
-		RemoveZeroValues: true,
-	}
-
-	for _, opt := range opts {
-		o = opt(o)
-	}
+	o := mapOptions(opts)
 
 	sem := semaphore.NewWeighted(int64(o.BatchSize))
 
@@ -961,6 +994,7 @@ itemLoop:
 		// worker never completes, wg.Wait never returns, MapCh hangs.
 		if ctx.Err() != nil {
 			errMutex.Lock()
+
 			errs = append(errs, customerror.New(fmt.Sprintf(`context errored before mapping "%+v"`, key)))
 			errMutex.Unlock()
 
@@ -969,8 +1003,10 @@ itemLoop:
 
 		// Semaphore handling. Same explicit-Unlock discipline as the
 		// ctx-err block above (v1.4.4 Grok-followup deadlock fix).
-		if err := sem.Acquire(ctx, 1); err != nil {
+		err := sem.Acquire(ctx, 1)
+		if err != nil {
 			errMutex.Lock()
+
 			errs = append(errs, customerror.New(fmt.Sprintf(`context timeout before mapping "%+v"`, key)))
 			errMutex.Unlock()
 
@@ -1019,6 +1055,7 @@ itemLoop:
 			}
 
 			resMutex.Lock()
+
 			results = append(results, res)
 			resultKeys = append(resultKeys, k)
 
@@ -1027,8 +1064,10 @@ itemLoop:
 
 			// Write to writer if specified.
 			if o.Writer != nil {
-				if resBytes, err := json.Marshal(res); err == nil {
-					if _, writeErr := o.Writer.Write(append(resBytes, '\n')); writeErr != nil {
+				resBytes, err := json.Marshal(res)
+				if err == nil {
+					_, writeErr := o.Writer.Write(append(resBytes, '\n'))
+					if writeErr != nil {
 						errMutex.Lock()
 
 						errs = append(errs, customerror.New(
@@ -1057,6 +1096,7 @@ itemLoop:
 	if endCh != nil {
 		resMutex.Lock()
 		finalResults := RemoveZeroValues(o.RemoveZeroValues, results)
+
 	endChLoop:
 		for _, result := range finalResults {
 			select {
@@ -1071,6 +1111,7 @@ itemLoop:
 	// Check if context was canceled and prioritize its error.
 	if ctx.Err() != nil {
 		errMutex.Lock()
+
 		errs = append([]error{ctx.Err()}, errs...)
 		errMutex.Unlock()
 	}

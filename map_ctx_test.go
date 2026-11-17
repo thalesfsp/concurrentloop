@@ -3,6 +3,7 @@
 // license that can be found in the LICENSE file.
 //
 //nolint:exhaustruct
+
 package concurrentloop
 
 import (
@@ -77,10 +78,12 @@ func TestMap_HappyPath_AllItemsProcessed(t *testing.T) {
 	for _, r := range results {
 		got += r
 	}
+
 	want := 0
 	for _, v := range items {
 		want += v * 2
 	}
+
 	if got != want {
 		t.Errorf("expected sum %d, got %d (results=%v)", want, got, results)
 	}
@@ -99,6 +102,7 @@ func TestMapM_HappyPath_AllKeysProcessed(t *testing.T) {
 	if len(errs) != 0 {
 		t.Fatalf("expected no errors, got %d: %v", len(errs), errs)
 	}
+
 	if len(results) != 3 {
 		t.Errorf("expected 3 results, got %d (results=%v)", len(results), results)
 	}
@@ -116,6 +120,7 @@ func TestMap_FuncReturnsError_CollectedInErrors(t *testing.T) {
 		if v == 2 {
 			return 0, errors.New("boom on 2")
 		}
+
 		return v, nil
 	}
 
@@ -126,12 +131,14 @@ func TestMap_FuncReturnsError_CollectedInErrors(t *testing.T) {
 	}
 
 	found := false
+
 	for _, e := range errs {
 		if e != nil && containsErr(e, "boom on 2") {
 			found = true
 			break
 		}
 	}
+
 	if !found {
 		t.Errorf("expected an error containing 'boom on 2', got %v", errs)
 	}
@@ -145,6 +152,7 @@ func TestMapM_FuncReturnsError_CollectedInErrors(t *testing.T) {
 		if v == 999 {
 			return 0, errors.New("the bad one")
 		}
+
 		return v, nil
 	}
 
@@ -153,13 +161,16 @@ func TestMapM_FuncReturnsError_CollectedInErrors(t *testing.T) {
 	if len(errs) == 0 {
 		t.Fatal("expected at least one error, got none")
 	}
+
 	found := false
+
 	for _, e := range errs {
 		if e != nil && containsErr(e, "the bad one") {
 			found = true
 			break
 		}
 	}
+
 	if !found {
 		t.Errorf("expected error 'the bad one' in errs, got %v", errs)
 	}
@@ -181,8 +192,10 @@ func TestMap_CtxAlreadyCancelled_DoesNotHang(t *testing.T) {
 	}
 
 	done := make(chan struct{})
+
 	go func() {
 		_, _ = Map(ctx, items, noop)
+
 		close(done)
 	}()
 
@@ -206,8 +219,10 @@ func TestMapM_CtxAlreadyCancelled_DoesNotHang(t *testing.T) {
 	}
 
 	done := make(chan struct{})
+
 	go func() {
 		_, _ = MapM(ctx, itemsMap, noop)
+
 		close(done)
 	}()
 
@@ -227,6 +242,7 @@ func TestMap_StuckChild_CtxFires_ReturnsWithinBound(t *testing.T) {
 	t.Parallel()
 
 	release := make(chan struct{})
+
 	t.Cleanup(func() { close(release) }) // unblock the leaked goroutine on test exit
 
 	stuck := stuckMapFn(release)
@@ -238,12 +254,14 @@ func TestMap_StuckChild_CtxFires_ReturnsWithinBound(t *testing.T) {
 
 	start := time.Now()
 	done := make(chan struct{})
+
 	var (
 		results []int
 		errs    Errors
 	)
 	go func() {
 		results, errs = Map(ctx, items, stuck)
+
 		close(done)
 	}()
 
@@ -255,6 +273,7 @@ func TestMap_StuckChild_CtxFires_ReturnsWithinBound(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatalf("Map blocked >2s after ctx deadline (100ms) — wg.Wait does not honor ctx")
 	}
+
 	elapsed := time.Since(start)
 
 	if elapsed > 1*time.Second {
@@ -263,12 +282,14 @@ func TestMap_StuckChild_CtxFires_ReturnsWithinBound(t *testing.T) {
 
 	// Must surface the ctx error somewhere in errs.
 	foundCtxErr := false
+
 	for _, e := range errs {
 		if errors.Is(e, context.DeadlineExceeded) || errors.Is(e, context.Canceled) {
 			foundCtxErr = true
 			break
 		}
 	}
+
 	if !foundCtxErr {
 		t.Errorf("expected ctx error (DeadlineExceeded or Canceled) in errs, got %v", errs)
 	}
@@ -282,6 +303,7 @@ func TestMapM_StuckChild_CtxFires_ReturnsWithinBound(t *testing.T) {
 	t.Parallel()
 
 	release := make(chan struct{})
+
 	t.Cleanup(func() { close(release) })
 
 	stuck := stuckMapMFn(release)
@@ -293,9 +315,11 @@ func TestMapM_StuckChild_CtxFires_ReturnsWithinBound(t *testing.T) {
 
 	start := time.Now()
 	done := make(chan struct{})
+
 	var errs Errors
 	go func() {
 		_, errs = MapM(ctx, itemsMap, stuck)
+
 		close(done)
 	}()
 
@@ -304,17 +328,20 @@ func TestMapM_StuckChild_CtxFires_ReturnsWithinBound(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatalf("MapM blocked >2s after ctx deadline (100ms) — wg.Wait does not honor ctx")
 	}
+
 	if elapsed := time.Since(start); elapsed > 1*time.Second {
 		t.Errorf("MapM returned but elapsed=%v >1s", elapsed)
 	}
 
 	foundCtxErr := false
+
 	for _, e := range errs {
 		if errors.Is(e, context.DeadlineExceeded) || errors.Is(e, context.Canceled) {
 			foundCtxErr = true
 			break
 		}
 	}
+
 	if !foundCtxErr {
 		t.Errorf("expected ctx error in errs, got %v", errs)
 	}
@@ -346,8 +373,10 @@ func TestMap_AllChildrenHonorCtx_CtxFires_NoHang(t *testing.T) {
 	items := []int{1, 2, 3, 4, 5}
 
 	done := make(chan struct{})
+
 	go func() {
 		_, _ = Map(ctx, items, honor)
+
 		close(done)
 	}()
 
@@ -372,6 +401,7 @@ func TestMap_EmptyItems_ReturnsEmpty(t *testing.T) {
 	if len(errs) != 0 {
 		t.Errorf("expected no errors on empty input, got %v", errs)
 	}
+
 	if len(results) != 0 {
 		t.Errorf("expected empty results on empty input, got %v", results)
 	}
@@ -387,6 +417,7 @@ func TestMapM_EmptyItems_ReturnsEmpty(t *testing.T) {
 	if len(errs) != 0 {
 		t.Errorf("expected no errors on empty input, got %v", errs)
 	}
+
 	if len(results) != 0 {
 		t.Errorf("expected empty results on empty input, got %v", results)
 	}
@@ -452,6 +483,7 @@ func containsErr(e error, sub string) bool {
 	if e == nil {
 		return false
 	}
+
 	return contains(e.Error(), sub)
 }
 
@@ -459,14 +491,17 @@ func contains(s, sub string) bool {
 	if len(sub) == 0 {
 		return true
 	}
+
 	if len(s) < len(sub) {
 		return false
 	}
+
 	for i := 0; i+len(sub) <= len(s); i++ {
 		if s[i:i+len(sub)] == sub {
 			return true
 		}
 	}
+
 	return false
 }
 

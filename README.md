@@ -6,6 +6,8 @@
 
 ## Install
 
+Requires Go 1.26.11 or later. Development uses Go 1.27.4 and golangci-lint 2.15.0, pinned in `mise.toml`; run checks with `mise exec -- make lint test coverage`. CI reads the minimum Go version from `go.mod`.
+
 `$ go get github.com/thalesfsp/concurrentloop`
 
 ### Specific version

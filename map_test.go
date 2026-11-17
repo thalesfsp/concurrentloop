@@ -3,6 +3,7 @@
 // license that can be found in the LICENSE file.
 //
 //nolint:exhaustruct
+
 package concurrentloop
 
 import (
@@ -77,18 +78,22 @@ func TestNew_ConcurrentProcessing(t *testing.T) {
 		t.Errorf("ConcurrentProcessing() error = %v", err1)
 		return
 	}
+
 	if err2 != nil {
 		t.Errorf("ConcurrentProcessing() error = %v", err2)
 		return
 	}
+
 	if err3 != nil {
 		t.Errorf("ConcurrentProcessing() error = %v", err3)
 		return
 	}
+
 	if err4 == nil {
 		t.Errorf("ConcurrentProcessing() error = %v", err4)
 		return
 	}
+
 	if err5 != nil {
 		t.Errorf("ConcurrentProcessing() error = %v", err5)
 		return
@@ -125,7 +130,6 @@ func TestNew_ConcurrentProcessing_WithConcurrency(t *testing.T) {
 
 	// Call the function concurrently.
 	r1, err1 := Map(t.Context(), sl1, cF1, WithBatchSize(1))
-
 	if err1 != nil {
 		t.Errorf("ConcurrentProcessing() error = %v", err1)
 		return
@@ -146,7 +150,6 @@ func TestNew_ConcurrentProcessing_WithLimit(t *testing.T) {
 
 	// Call the function concurrently.
 	r1, err1 := Map(t.Context(), sl1, cF1, WithLimit(3), WithRandomDelayTime(100, 300, time.Millisecond))
-
 	if err1 != nil {
 		t.Errorf("ConcurrentProcessing() error = %v", err1)
 		return
@@ -217,6 +220,7 @@ func TestNew_ConcurrentProcessingCh(t *testing.T) {
 		if s == "c" {
 			return "", errors.New("error")
 		}
+
 		return s, nil
 	}
 
@@ -229,6 +233,7 @@ func TestNew_ConcurrentProcessingCh(t *testing.T) {
 			time.Sleep(2 * time.Second)
 			return s, nil
 		}
+
 		return s, nil
 	}
 
@@ -239,6 +244,7 @@ func TestNew_ConcurrentProcessingCh(t *testing.T) {
 			close(done)
 			return "", errors.New("terminating early")
 		}
+
 		return s, nil
 	}
 
@@ -263,18 +269,22 @@ func TestNew_ConcurrentProcessingCh(t *testing.T) {
 		t.Errorf("ConcurrentProcessingCh() error = %v", err1)
 		return
 	}
+
 	if err2 != nil {
 		t.Errorf("ConcurrentProcessingCh() error = %v", err2)
 		return
 	}
+
 	if err3 != nil {
 		t.Errorf("ConcurrentProcessingCh() error = %v", err3)
 		return
 	}
+
 	if err4 == nil {
 		t.Errorf("ConcurrentProcessingCh() expected error but got nil")
 		return
 	}
+
 	if err5 != nil {
 		t.Errorf("ConcurrentProcessingCh() error = %v", err5)
 		return
@@ -315,7 +325,6 @@ func TestNew_ConcurrentProcessing_WithConcurrencyCh(t *testing.T) {
 
 	// Call the function concurrently.
 	r1, err1 := MapDone(t.Context(), sl1, cF1, WithBatchSize(1))
-
 	if err1 != nil {
 		t.Errorf("ConcurrentProcessing() error = %v", err1)
 		return
@@ -336,7 +345,6 @@ func TestNew_ConcurrentProcessing_WithLimitCh(t *testing.T) {
 
 	// Call the function concurrently.
 	r1, err1 := MapDone(t.Context(), sl1, cF1, WithLimit(3), WithRandomDelayTime(100, 300, time.Millisecond))
-
 	if err1 != nil {
 		t.Errorf("ConcurrentProcessing() error = %v", err1)
 		return
@@ -359,7 +367,6 @@ func TestMap_WithWriter(t *testing.T) {
 
 	// Call the function concurrently with writer option.
 	r1, err1 := Map(t.Context(), sl1, cF1, WithWriter(&buf))
-
 	if err1 != nil {
 		t.Errorf("Map() error = %v", err1)
 		return
@@ -417,7 +424,6 @@ func TestMap_WithWriterToFile(t *testing.T) {
 
 	// Call Map with the writer option pointing to the temp file
 	results, errors := Map(t.Context(), salesData, processSales, WithWriter(tempFile))
-
 	if errors != nil {
 		t.Errorf("Map() error = %v", errors)
 		return
@@ -443,7 +449,9 @@ func TestMap_WithWriterToFile(t *testing.T) {
 
 	// Verify JSON structure by attempting to unmarshal one line
 	lines := bytes.Split(fileContent, []byte("\n"))
+
 	var testRecord SalesRecord
+
 	err = json.Unmarshal(bytes.TrimSpace(lines[0]), &testRecord)
 	assert.NoError(t, err)
 	assert.NotZero(t, testRecord.ID)
@@ -468,9 +476,9 @@ func TestMapCh(t *testing.T) {
 			default:
 			}
 		}
+
 		return key, nil
 	}, perCycleCh, endCh)
-
 	if errs != nil {
 		t.Fatalf("MapCh() error = %v", errs)
 	}
@@ -484,6 +492,7 @@ func TestMapCh(t *testing.T) {
 	for result := range perCycleCh {
 		perCycleResults = append(perCycleResults, result)
 	}
+
 	assert.Len(t, perCycleResults, 3)
 
 	// Check end results.
@@ -491,6 +500,7 @@ func TestMapCh(t *testing.T) {
 	for result := range endCh {
 		endResults = append(endResults, result)
 	}
+
 	assert.Len(t, endResults, 3)
 }
 
@@ -514,6 +524,7 @@ func TestMapCh_WithPerCycleFileOutput(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
+
 		for result := range perCycleCh {
 			_, _ = tempFile.WriteString(result + "\n")
 		}
@@ -531,9 +542,9 @@ func TestMapCh_WithPerCycleFileOutput(t *testing.T) {
 			default:
 			}
 		}
+
 		return key, nil
 	}, perCycleCh, endCh)
-
 	if errs != nil {
 		t.Fatalf("MapCh() error = %v", errs)
 	}
@@ -581,12 +592,14 @@ func TestMapCh_WithNilChannels(t *testing.T) {
 			default:
 			}
 		}
+
 		if end != nil {
 			select {
 			case end <- "completed-" + key:
 			default:
 			}
 		}
+
 		return key, nil
 	}, nil, nil) // Pass nil channels
 
@@ -616,9 +629,9 @@ func TestMapCh_WithOnlyPerCycleChannel(t *testing.T) {
 			default:
 			}
 		}
+
 		return key, nil
 	}, perCycleCh, nil) // Only perCycleCh, endCh is nil
-
 	if errs != nil {
 		t.Fatalf("MapCh() error = %v", errs)
 	}
@@ -631,6 +644,7 @@ func TestMapCh_WithOnlyPerCycleChannel(t *testing.T) {
 	for result := range perCycleCh {
 		perCycleResults = append(perCycleResults, result)
 	}
+
 	assert.Len(t, perCycleResults, 3)
 }
 
@@ -648,7 +662,6 @@ func TestMapCh_WithOnlyEndChannel(t *testing.T) {
 		// No per-cycle processing since perCycle is nil
 		return key, nil
 	}, nil, endCh) // perCycleCh is nil, only endCh
-
 	if errs != nil {
 		t.Fatalf("MapCh() error = %v", errs)
 	}
@@ -661,6 +674,7 @@ func TestMapCh_WithOnlyEndChannel(t *testing.T) {
 	for result := range endCh {
 		endResults = append(endResults, result)
 	}
+
 	assert.Len(t, endResults, 3)
 }
 
@@ -668,8 +682,8 @@ func TestMapCh_WithOnlyEndChannel(t *testing.T) {
 // when using break inside select statements within for loops.
 func TestBreakStatementBehavior(t *testing.T) {
 	t.Run("unlabeled_break_only_exits_select", func(t *testing.T) {
-		processedItems := []string{}
 		items := []string{"a", "b", "c", "d", "e"}
+		processedItems := make([]string, 0, len(items))
 		cancelCtx, cancel := context.WithCancel(t.Context())
 
 		// Cancel immediately to trigger the break.
@@ -698,8 +712,8 @@ func TestBreakStatementBehavior(t *testing.T) {
 	})
 
 	t.Run("labeled_break_exits_entire_loop", func(t *testing.T) {
-		processedItems := []string{}
 		items := []string{"a", "b", "c", "d", "e"}
+		processedItems := make([]string, 0, len(items))
 		cancelCtx, cancel := context.WithCancel(t.Context())
 
 		// Cancel immediately to trigger the break.
@@ -750,6 +764,7 @@ func TestBreakStatementBehavior(t *testing.T) {
 			time.Sleep(20 * time.Millisecond)
 
 			processedCount++
+
 			t.Logf("Processed item %d: %s", i+1, item)
 		}
 
@@ -788,7 +803,7 @@ func TestMap_WithFailingWriter_StopsImmediately(t *testing.T) {
 
 	// Create a failing writer that will fail after a very small amount of data
 	// Each marshaled int is roughly 1-2 bytes, so this should fail quickly
-	failingWriter := &FailingWriter{maxBytes: 10} // Fail after ~10 bytes
+	failingWriter := &FailingWriter{maxBytes: 10, written: 0} // Fail after ~10 bytes
 
 	processFunc := func(_ context.Context, item int) (int, error) {
 		return item * 2, nil
@@ -803,6 +818,7 @@ func TestMap_WithFailingWriter_StopsImmediately(t *testing.T) {
 
 	// Debug: Print a few error messages
 	t.Logf("First few errors:")
+
 	for i, err := range errs {
 		if i < 5 { // Only print first 5 errors
 			t.Logf("  Error %d: %s", i, err.Error())
@@ -811,6 +827,7 @@ func TestMap_WithFailingWriter_StopsImmediately(t *testing.T) {
 
 	// Check that at least one error is about writing failure
 	hasWriteError := false
+
 	for _, err := range errs {
 		errMsg := err.Error()
 		if strings.Contains(errMsg, "failed to write result to writer") {
@@ -818,6 +835,7 @@ func TestMap_WithFailingWriter_StopsImmediately(t *testing.T) {
 			break
 		}
 	}
+
 	assert.True(t, hasWriteError, "Should have a write failure error")
 
 	// The key assertion: when a write error occurs in a goroutine, that goroutine
@@ -827,6 +845,7 @@ func TestMap_WithFailingWriter_StopsImmediately(t *testing.T) {
 
 	// Count non-zero results (successful processing)
 	nonZeroResults := 0
+
 	for _, result := range results {
 		if result != 0 {
 			nonZeroResults++
@@ -851,7 +870,7 @@ func TestMapM_WithFailingWriter_StopsImmediately(t *testing.T) {
 	}
 
 	// Create a failing writer that will fail after a very small amount of data
-	failingWriter := &FailingWriter{maxBytes: 10} // Fail after ~10 bytes
+	failingWriter := &FailingWriter{maxBytes: 10, written: 0} // Fail after ~10 bytes
 
 	processFunc := func(_ context.Context, _ string, item int) (int, error) {
 		return item * 2, nil
@@ -866,6 +885,7 @@ func TestMapM_WithFailingWriter_StopsImmediately(t *testing.T) {
 
 	// Check that at least one error is about writing failure
 	hasWriteError := false
+
 	for _, err := range errs {
 		errMsg := err.Error()
 		if strings.Contains(errMsg, "failed to write result to writer") {
@@ -873,6 +893,7 @@ func TestMapM_WithFailingWriter_StopsImmediately(t *testing.T) {
 			break
 		}
 	}
+
 	assert.True(t, hasWriteError, "Should have a write failure error")
 
 	t.Logf("Processed %d items, Total items: %d", len(results), len(itemsMap))
@@ -891,7 +912,7 @@ func TestMapCh_WithFailingWriter_StopsImmediately(t *testing.T) {
 	}
 
 	// Create a failing writer that will fail after a very small amount of data
-	failingWriter := &FailingWriter{maxBytes: 10} // Fail after ~10 bytes
+	failingWriter := &FailingWriter{maxBytes: 10, written: 0} // Fail after ~10 bytes
 
 	// Create channels for results
 	perCycleCh := make(chan int, 50)
@@ -905,6 +926,7 @@ func TestMapCh_WithFailingWriter_StopsImmediately(t *testing.T) {
 			default:
 			}
 		}
+
 		return item * 2, nil
 	}
 
@@ -921,6 +943,7 @@ func TestMapCh_WithFailingWriter_StopsImmediately(t *testing.T) {
 
 	// Check that at least one error is about writing failure
 	hasWriteError := false
+
 	for _, err := range errs {
 		errMsg := err.Error()
 		if strings.Contains(errMsg, "failed to write result to writer") {
@@ -928,6 +951,7 @@ func TestMapCh_WithFailingWriter_StopsImmediately(t *testing.T) {
 			break
 		}
 	}
+
 	assert.True(t, hasWriteError, "Should have a write failure error")
 
 	// Count results from channels
